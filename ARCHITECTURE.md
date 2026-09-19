@@ -217,6 +217,7 @@ feature-detected and simply absent there.
 | Recognition types + detection | `utils/speechRecognition.ts` |
 | Synthesis store (shared global) | `utils/speechSynthesis.ts` |
 | Markdown stripping + chunking | `utils/text.ts` |
+| Farewell detection | `utils/intent.ts` |
 | Mic / status UI | `components/AgentChat/components/{MicButton,VoiceStatus}` |
 
 #### The rule that matters
@@ -246,6 +247,15 @@ only resumes from the utterance's `onEnd`.
   between server and client; branching on it directly is a hydration error.
 - **Three consecutive silent turns end voice mode**, so a forgotten open
   mic doesn't sit there indefinitely.
+- **Saying goodbye ends voice mode**, but only after the agent's reply has
+  finished playing — hanging up the moment "bye" is heard would talk over
+  its sign-off. Detection is a keyword match in `utils/intent.ts`, not a
+  model call: it must decide in the same tick the transcript arrives.
+  It only matches the **last few words** of an utterance, because a
+  farewell word early on is usually the visitor talking *about* it
+  ("goodbye is a strange word to ask about" must not hang up). Missing a
+  farewell is harmless — the visitor taps stop; ending one by mistake is
+  not, so the patterns stay narrow.
 - **Long answers are spoken as a queue of short utterances.** Chrome
   truncates a single utterance after roughly 15 seconds.
 - **Answers are stripped of markdown before speaking.** Raw markdown reads

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAgentChat, type UseAgentChat, type UseAgentChatOptions } from "./useAgentChat";
 import { useSpeechRecognition } from "./useSpeechRecognition";
 import { useTextToSpeech } from "./useTextToSpeech";
+import { isFarewell } from "@/utils/intent";
 import { markdownToPlainText } from "@/utils/text";
 import { stopSpeaking } from "@/utils/speechSynthesis";
 import type { ChatMessage } from "@/types";
@@ -56,9 +57,16 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
   const silentTurnsRef = useRef(0);
   const sendRef = useRef<(text: string) => void>(() => {});
   const speakingIdRef = useRef<string | null>(null);
-  // Set from an effect below: `handleRecognitionEnd` is defined before
-  // `recognition` exists, so it reaches the restart through this ref.
+  /**
+   * Set when the visitor says goodbye. The reply is still spoken — ending
+   * the loop the moment they say "bye" would talk over the agent's
+   * sign-off — and voice mode closes once it finishes.
+   */
+  const endAfterReplyRef = useRef(false);
+  // Set from effects below: these callbacks are defined before the values
+  // they need exist, so they reach them through refs.
   const restartListeningRef = useRef<() => void>(() => {});
+  const stopRef = useRef<() => void>(() => {});
 
   const speech = useTextToSpeech();
 
@@ -73,6 +81,7 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
     (transcript: string) => {
       if (phaseRef.current !== "listening") return;
       silentTurnsRef.current = 0;
+      endAfterReplyRef.current = isFarewell(transcript);
       toPhase("thinking");
       sendRef.current(transcript);
     },
@@ -112,10 +121,19 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
     (message: ChatMessage) => {
       if (phaseRef.current !== "thinking") return;
 
-      const text = markdownToPlainText(message.content);
-      if (!text) {
+      /** Where the loop goes once the agent has finished talking. */
+      const afterReply = () => {
+        if (endAfterReplyRef.current) {
+          stopRef.current();
+          return;
+        }
         toPhase("listening");
         recognition.start();
+      };
+
+      const text = markdownToPlainText(message.content);
+      if (!text) {
+        afterReply();
         return;
       }
 
@@ -129,8 +147,7 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
           speakingIdRef.current = null;
           // Only continue if the visitor has not left voice mode meanwhile.
           if (phaseRef.current !== "speaking") return;
-          toPhase("listening");
-          recognition.start();
+          afterReply();
         },
       });
     },
@@ -153,11 +170,13 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
     sendRef.current = chat.sendMessage;
   }, [chat.sendMessage]);
 
+
   // --- controls --------------------------------------------------------
 
   const start = useCallback(() => {
     if (phaseRef.current !== "idle") return;
     silentTurnsRef.current = 0;
+    endAfterReplyRef.current = false;
     toPhase("listening");
     recognition.start();
   }, [recognition, toPhase]);
@@ -165,10 +184,15 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
   const stop = useCallback(() => {
     silentTurnsRef.current = 0;
     speakingIdRef.current = null;
+    endAfterReplyRef.current = false;
     toPhase("idle");
     recognition.stop();
     speech.stop();
   }, [recognition, speech, toPhase]);
+
+  useEffect(() => {
+    stopRef.current = stop;
+  }, [stop]);
 
   const toggle = useCallback(() => {
     if (phaseRef.current === "idle") start();
