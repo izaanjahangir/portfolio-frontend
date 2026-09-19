@@ -1,0 +1,100 @@
+/* Typography for rendered agent answers. Intentionally plain — restyle
+   freely once the portfolio design lands; nothing else depends on it. */
+
+.markdown {
+  font-size: 0.95rem;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.markdown > :first-child { margin-top: 0; }
+.markdown > :last-child { margin-bottom: 0; }
+
+.markdown p,
+.markdown ul,
+.markdown ol,
+.markdown blockquote {
+  margin: 0 0 0.75em;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4 {
+  margin: 1.25em 0 0.5em;
+  line-height: 1.3;
+  font-weight: 600;
+}
+
+.markdown h1 { font-size: 1.35rem; }
+.markdown h2 { font-size: 1.2rem; }
+.markdown h3 { font-size: 1.05rem; }
+.markdown h4 { font-size: 0.98rem; }
+
+.markdown ul,
+.markdown ol { padding-left: 1.35em; }
+.markdown li { margin: 0.25em 0; }
+
+.markdown a {
+  color: var(--agent-accent, #2563eb);
+  text-underline-offset: 2px;
+}
+
+.markdown blockquote {
+  border-left: 3px solid var(--agent-border, #d4d4d8);
+  padding-left: 0.9em;
+  color: var(--agent-muted, #71717a);
+}
+
+.markdown code {
+  font-family: var(--font-geist-mono, ui-monospace, monospace);
+  font-size: 0.87em;
+  background: var(--agent-code-bg, rgba(127, 127, 127, 0.14));
+  padding: 0.15em 0.38em;
+  border-radius: 4px;
+}
+
+.pre {
+  background: var(--agent-pre-bg, #1e1e2e);
+  color: var(--agent-pre-fg, #e4e4e7);
+  padding: 0.9em 1em;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 0 0 0.75em;
+}
+
+.pre code {
+  background: none;
+  padding: 0;
+  font-size: 0.85em;
+  line-height: 1.55;
+}
+
+.tableWrapper {
+  overflow-x: auto;
+  margin: 0 0 0.75em;
+}
+
+.tableWrapper table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.9em;
+}
+
+.tableWrapper th,
+.tableWrapper td {
+  border: 1px solid var(--agent-border, #d4d4d8);
+  padding: 0.45em 0.7em;
+  text-align: left;
+}
+
+.tableWrapper th {
+  background: var(--agent-code-bg, rgba(127, 127, 127, 0.1));
+  font-weight: 600;
+}
+
+.markdown hr {
+  border: none;
+  border-top: 1px solid var(--agent-border, #d4d4d8);
+  margin: 1.25em 0;
+}

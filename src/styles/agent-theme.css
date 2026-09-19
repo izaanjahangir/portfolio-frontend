@@ -1,0 +1,36 @@
+/**
+ * Agent theme + code highlighting.
+ *
+ * Import ONCE from src/app/layout.tsx:
+ *   import "@/features/ai-agent/styles/agent-theme.css";
+ *
+ * Override any --agent-* variable from your own stylesheet to restyle the
+ * chat without touching component code.
+ */
+
+@import "highlight.js/styles/github-dark.css";
+
+:root {
+  --agent-bg: transparent;
+  --agent-fg: #18181b;
+  --agent-surface: rgba(113, 113, 122, 0.12);
+  --agent-border: #e4e4e7;
+  --agent-muted: #71717a;
+  --agent-accent: #2563eb;
+  --agent-danger: #dc2626;
+  --agent-code-bg: rgba(113, 113, 122, 0.14);
+  --agent-pre-bg: #0d1117;
+  --agent-pre-fg: #e6edf3;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --agent-fg: #f4f4f5;
+    --agent-surface: rgba(228, 228, 231, 0.1);
+    --agent-border: #2a2a30;
+    --agent-muted: #a1a1aa;
+    --agent-accent: #3b82f6;
+    --agent-danger: #f87171;
+    --agent-code-bg: rgba(228, 228, 231, 0.12);
+  }
+}

@@ -1,0 +1,11 @@
+.screen {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 2rem 1rem;
+}
+
+.frame {
+  width: min(48rem, 100%);
+  height: min(42rem, 85dvh);
+}

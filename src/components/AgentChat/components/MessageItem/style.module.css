@@ -1,0 +1,41 @@
+.row {
+  display: flex;
+  width: 100%;
+}
+
+.user { justify-content: flex-end; }
+.assistant { justify-content: flex-start; }
+
+.bubble {
+  max-width: min(46rem, 88%);
+  padding: 0.7rem 0.95rem;
+  border-radius: 14px;
+  transition: opacity 0.15s ease;
+}
+
+.user .bubble {
+  background: var(--agent-accent, #2563eb);
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+
+.assistant .bubble {
+  background: var(--agent-surface, rgba(127, 127, 127, 0.1));
+  color: inherit;
+  border-bottom-left-radius: 4px;
+}
+
+.pending { opacity: 0.6; }
+
+.failed {
+  outline: 1px solid var(--agent-danger, #dc2626);
+  outline-offset: 1px;
+}
+
+.plain {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.95rem;
+  line-height: 1.55;
+}
