@@ -200,38 +200,67 @@ The transcript lives in the React Query cache under
 
 ### Voice (phase 1: browser-native)
 
-Speech-to-text and text-to-speech both use the Web Speech API — no backend,
-no cost. Chrome, Edge and Safari support it; Firefox does not, so every
-entry point is feature-detected and the UI simply omits the control.
+Hands-free voice conversation using the Web Speech API — no backend, no
+cost. The visitor taps the mic once and then just talks; there is no send
+button in the loop and no dictation-into-a-textbox step.
+
+```
+idle → listening → thinking → speaking → listening → …
+```
+
+Chrome, Edge and Safari support it; Firefox does not, so the control is
+feature-detected and simply absent there.
 
 | Piece | File |
 | --- | --- |
+| The loop | `hooks/useVoiceChat.ts` |
 | Recognition types + detection | `utils/speechRecognition.ts` |
 | Synthesis store (shared global) | `utils/speechSynthesis.ts` |
 | Markdown stripping + chunking | `utils/text.ts` |
-| Push-to-talk hook | `hooks/useSpeechRecognition.ts` |
-| Playback hook | `hooks/useTextToSpeech.ts` |
-| Mic / speak buttons | `components/AgentChat/components/{MicButton,SpeakButton}` |
+| Mic / status UI | `components/AgentChat/components/{MicButton,VoiceStatus}` |
 
-Things that are the way they are for a reason:
+#### The rule that matters
 
-- **Feature detection goes through `useClientFlag`.** Detection returns
-  false on the server and true in the browser; branching on it directly
-  renders a mic button in one pass and not the other, which React rejects
-  as a hydration error. `useSyncExternalStore` is the supported escape.
-- **Synthesis state lives in an external store, not component state.**
-  `window.speechSynthesis` is a single global — two components each with
-  their own "is it speaking?" would disagree the moment one started.
+**The mic is never open while the agent is speaking.** If it were,
+recognition would transcribe the agent's own voice, send it back as the
+next question, and the conversation would talk to itself indefinitely.
+Every transition into `speaking` stops recognition first, and listening
+only resumes from the utterance's `onEnd`.
+
+#### Other things that are the way they are for a reason
+
+- **The loop runs on callbacks, not effects.** An effect watching "has a
+  reply arrived?" reacts a render late — long enough to reopen the mic
+  while the agent is still talking. Reply arrival is delivered through
+  `onAssistantMessage`, threaded from the mutation's `onSuccess`.
+- **`speak()` reports failure as completion.** A device with no voices
+  accepts an utterance, reports `speaking === true`, and never fires
+  `onend`. Without treating that as an ending, the loop hangs in
+  `speaking` forever and the mic never reopens. Guards: refuse to speak
+  when no voice exists, and a per-utterance stall ceiling.
+- **Hook return values are memoised.** They end up in effect dependency
+  arrays; a fresh object each render re-runs those effects continuously.
+  This caused a real bug — the teardown effect cancelled every utterance
+  mid-sentence, leaving the loop stuck.
+- **Feature detection goes through `useClientFlag`.** Detection differs
+  between server and client; branching on it directly is a hydration error.
+- **Three consecutive silent turns end voice mode**, so a forgotten open
+  mic doesn't sit there indefinitely.
 - **Long answers are spoken as a queue of short utterances.** Chrome
-  silently truncates a single utterance after roughly 15 seconds.
+  truncates a single utterance after roughly 15 seconds.
 - **Answers are stripped of markdown before speaking.** Raw markdown reads
   as punctuation soup; code blocks are announced, not spelled out.
-- **Dictation fills the composer, it does not auto-send.** Recognition
-  misfires, and sending a wrong transcript is worse than one extra click.
-  Change `appendTranscript` in `Composer` if you want auto-send.
-- **Auto-speak never fires on load.** The "spoken" marker is seeded on the
-  first run so restored history and the greeting stay silent — browsers
-  block audio without a user gesture anyway.
+
+#### Known limits
+
+- **No barge-in.** Interrupting means tapping stop — the mic is closed
+  while the agent speaks, so it cannot hear you. Real barge-in needs
+  acoustic echo cancellation and a VAD running on a live audio stream,
+  which the Web Speech API does not expose.
+- **Requires HTTPS** in production, or the mic never prompts.
+- **Chrome's recognition is not on-device** — audio goes to Google's
+  servers. Worth disclosing.
+- Per-message speak buttons remain available outside voice mode.
 
 Phase 2 (server TTS for a natural voice) is not built. If you add it, do
 **not** accept arbitrary text at an endpoint — that makes the site a free

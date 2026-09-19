@@ -25,6 +25,10 @@ export interface UseAgentChatOptions {
   greeting?: string;
   /** Rehydrate the stored session on mount. Default: true. */
   restoreSession?: boolean;
+  /** Fired with the assistant's reply the moment it lands. */
+  onAssistantMessage?: (message: ChatMessage) => void;
+  /** Fired when a send fails. */
+  onSendError?: () => void;
 }
 
 export interface UseAgentChat {
@@ -44,13 +48,16 @@ export interface UseAgentChat {
 }
 
 export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChat {
-  const { greeting, restoreSession = true } = options;
+  const { greeting, restoreSession = true, onAssistantMessage, onSendError } = options;
 
   const queryClient = useQueryClient();
   const identity = useIdentity();
 
   const conversation = useConversation(identity.sessionId, restoreSession);
-  const sendMutation = useSendMessage(identity);
+  const sendMutation = useSendMessage(identity, {
+    onAssistantMessage,
+    onError: onSendError,
+  });
 
   const threadKey = queryKeys.conversation(identity.sessionId ?? DRAFT_THREAD);
 

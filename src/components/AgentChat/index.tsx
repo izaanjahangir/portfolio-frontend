@@ -1,11 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Composer } from "./components/Composer";
 import { MessageList } from "./components/MessageList";
-import { useAgentChat } from "@/hooks/useAgentChat";
-import { useTextToSpeech } from "@/hooks/useTextToSpeech";
-import { markdownToPlainText } from "@/utils/text";
+import { useVoiceChat } from "@/hooks/useVoiceChat";
 import styles from "./style.module.css";
 
 export interface AgentChatProps {
@@ -17,7 +14,7 @@ export interface AgentChatProps {
   title?: string;
   /** Hide the header entirely when embedding in your own chrome. */
   showHeader?: boolean;
-  /** Offer the "read replies aloud" toggle. Default: true. */
+  /** Offer hands-free voice mode. Default: true. */
   enableVoice?: boolean;
   className?: string;
 }
@@ -47,51 +44,18 @@ export function AgentChat({
     retryLast,
     startNewConversation,
     dismissError,
-  } = useAgentChat({ greeting });
+    voice,
+  } = useVoiceChat({ greeting });
 
   // Offer prompts until the visitor has actually said something. The greeting
   // is an assistant message, so `messages.length` alone is not the test.
   const showSuggestions =
     !isRestoring &&
+    !voice.isActive &&
     suggestions.length > 0 &&
     !messages.some((message) => message.role === "user");
 
-  const speech = useTextToSpeech();
-  const [autoSpeak, setAutoSpeak] = useState(false);
-
-  const lastAssistantMessage = useMemo(
-    () => [...messages].reverse().find((message) => message.role === "assistant"),
-    [messages],
-  );
-
-  // Tracks what has already been spoken. Seeded on the first run so that
-  // restored history and the greeting are never read aloud on load —
-  // browsers block audio without a user gesture anyway.
-  const lastSpokenIdRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    const message = lastAssistantMessage;
-    if (!message) return;
-
-    const isFirstRun = lastSpokenIdRef.current === null;
-    const alreadySpoken = lastSpokenIdRef.current === message.id;
-    lastSpokenIdRef.current = message.id;
-
-    if (isFirstRun || alreadySpoken || !autoSpeak) return;
-
-    const text = markdownToPlainText(message.content);
-    if (text) speech.speak(message.id, text);
-  }, [lastAssistantMessage, autoSpeak, speech]);
-
-  const toggleAutoSpeak = useCallback(() => {
-    setAutoSpeak((current) => {
-      // Turning it off should silence whatever is mid-sentence.
-      if (current) speech.stop();
-      return !current;
-    });
-  }, [speech]);
-
-  const showVoiceToggle = enableVoice && speech.isSupported;
+  const showVoice = enableVoice && voice.isSupported;
 
   return (
     <section className={`${styles.chat} ${className ?? ""}`}>
@@ -99,18 +63,6 @@ export function AgentChat({
         <header className={styles.header}>
           <h2 className={styles.title}>{title}</h2>
           <div className={styles.headerActions}>
-            {showVoiceToggle ? (
-              <button
-                type="button"
-                className={`${styles.toggle} ${autoSpeak ? styles.toggleOn : ""}`}
-                onClick={toggleAutoSpeak}
-                aria-pressed={autoSpeak}
-                title={autoSpeak ? "Stop reading replies aloud" : "Read replies aloud"}
-              >
-                {autoSpeak ? "Voice on" : "Voice off"}
-              </button>
-            ) : null}
-
             <button
               type="button"
               className={styles.reset}
@@ -159,7 +111,21 @@ export function AgentChat({
         </div>
       ) : null}
 
-      <Composer onSubmit={sendMessage} disabled={isSending} placeholder={placeholder} />
+      <Composer
+        onSubmit={sendMessage}
+        disabled={isSending}
+        placeholder={placeholder}
+        voice={
+          showVoice
+            ? {
+                phase: voice.phase,
+                interim: voice.interim,
+                error: voice.error,
+                onToggle: voice.toggle,
+              }
+            : undefined
+        }
+      />
     </section>
   );
 }

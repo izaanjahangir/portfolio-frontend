@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useSyncExternalStore } from "react";
+import { useCallback, useMemo, useSyncExternalStore } from "react";
 import {
   getSpeechServerSnapshot,
   getSpeechSnapshot,
@@ -8,6 +8,7 @@ import {
   speak,
   stopSpeaking,
   subscribeToSpeech,
+  type SpeakOptions,
 } from "@/utils/speechSynthesis";
 import { useClientFlag } from "./useClientFlag";
 
@@ -18,7 +19,7 @@ export interface UseTextToSpeech {
   isSpeaking: boolean;
   /** Speaks `text`; speaking the message that is already playing stops it. */
   toggle: (id: string, text: string) => void;
-  speak: (id: string, text: string) => void;
+  speak: (id: string, text: string, options?: SpeakOptions) => void;
   stop: () => void;
 }
 
@@ -45,12 +46,17 @@ export function useTextToSpeech(): UseTextToSpeech {
     [speakingId],
   );
 
-  return {
-    isSupported,
-    speakingId,
-    isSpeaking: speakingId !== null,
-    toggle,
-    speak,
-    stop: stopSpeaking,
-  };
+  // Memoised: callers put this object in effect dependency arrays, and a
+  // fresh identity each render would re-run those effects continuously.
+  return useMemo(
+    () => ({
+      isSupported,
+      speakingId,
+      isSpeaking: speakingId !== null,
+      toggle,
+      speak,
+      stop: stopSpeaking,
+    }),
+    [isSupported, speakingId, toggle],
+  );
 }

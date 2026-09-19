@@ -12,7 +12,18 @@ import { useClientFlag } from "./useClientFlag";
 export interface UseSpeechRecognitionOptions {
   /** Called with each finalised phrase. */
   onResult: (transcript: string) => void;
+  /**
+   * Called when the mic closes, reporting whether anything was heard.
+   * The voice loop uses `hadResult: false` to detect silence and decide
+   * whether to listen again or give up.
+   */
+  onEnd?: (info: { hadResult: boolean }) => void;
   lang?: string;
+  /**
+   * Suppress the "I didn't catch that" message. The voice loop handles
+   * silence by restarting rather than by showing an error.
+   */
+  ignoreNoSpeech?: boolean;
 }
 
 export interface UseSpeechRecognition {
@@ -36,7 +47,9 @@ export interface UseSpeechRecognition {
  */
 export function useSpeechRecognition({
   onResult,
+  onEnd,
   lang = "en-US",
+  ignoreNoSpeech = false,
 }: UseSpeechRecognitionOptions): UseSpeechRecognition {
   // Detected through useClientFlag so the mic button does not appear in the
   // server render and vanish on hydration.
@@ -48,11 +61,16 @@ export function useSpeechRecognition({
 
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
 
-  // Keep the latest callback reachable without re-creating `start`.
+  // Keep the latest callbacks reachable without re-creating `start`.
   const onResultRef = useRef(onResult);
+  const onEndRef = useRef(onEnd);
   useEffect(() => {
     onResultRef.current = onResult;
-  }, [onResult]);
+    onEndRef.current = onEnd;
+  }, [onResult, onEnd]);
+
+  // Whether the current session produced a final transcript.
+  const hadResultRef = useRef(false);
 
   // Never leave the mic open behind us.
   useEffect(
@@ -85,6 +103,7 @@ export function useSpeechRecognition({
     recognition.maxAlternatives = 1;
 
     recognition.onstart = () => {
+      hadResultRef.current = false;
       setIsListening(true);
       setError(null);
     };
@@ -97,7 +116,10 @@ export function useSpeechRecognition({
         const transcript = result[0]?.transcript ?? "";
         if (result.isFinal) {
           const finalText = transcript.trim();
-          if (finalText) onResultRef.current(finalText);
+          if (finalText) {
+            hadResultRef.current = true;
+            onResultRef.current(finalText);
+          }
         } else {
           draft += transcript;
         }
@@ -107,6 +129,7 @@ export function useSpeechRecognition({
     };
 
     recognition.onerror = (event) => {
+      if (ignoreNoSpeech && event.error === "no-speech") return;
       const message = describeRecognitionError(event.error);
       if (message) setError(message);
     };
@@ -115,6 +138,7 @@ export function useSpeechRecognition({
       recognitionRef.current = null;
       setIsListening(false);
       setInterim("");
+      onEndRef.current?.({ hadResult: hadResultRef.current });
     };
 
     try {
@@ -125,7 +149,7 @@ export function useSpeechRecognition({
       recognitionRef.current = null;
       setIsListening(false);
     }
-  }, [lang]);
+  }, [lang, ignoreNoSpeech]);
 
   const toggle = useCallback(() => {
     if (recognitionRef.current) stop();

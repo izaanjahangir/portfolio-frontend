@@ -22,12 +22,27 @@
   cursor: not-allowed;
 }
 
+/* One colour per phase, so the state is readable at a glance. */
 .listening,
 .listening:not(:disabled):hover {
   color: #fff;
   background: var(--agent-danger, #dc2626);
   border-color: transparent;
   animation: pulse 1.6s ease-in-out infinite;
+}
+
+.thinking,
+.thinking:not(:disabled):hover {
+  color: #fff;
+  background: var(--agent-muted, #71717a);
+  border-color: transparent;
+}
+
+.speaking,
+.speaking:not(:disabled):hover {
+  color: #fff;
+  background: var(--agent-accent, #2563eb);
+  border-color: transparent;
 }
 
 @keyframes pulse {

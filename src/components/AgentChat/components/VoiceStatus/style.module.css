@@ -1,0 +1,39 @@
+.status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0.55rem 1rem 0;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  color: var(--agent-muted, #71717a);
+}
+
+.text {
+  overflow-wrap: anywhere;
+}
+
+.dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.listening {
+  color: var(--agent-danger, #dc2626);
+  animation: blink 1.4s ease-in-out infinite;
+}
+
+.thinking { color: var(--agent-muted, #71717a); }
+.speaking { color: var(--agent-accent, #2563eb); }
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .listening { animation: none; }
+}

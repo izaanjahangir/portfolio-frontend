@@ -91,6 +91,14 @@ name, so a page sets only its own title.
 **Feature-detect browser APIs through `useClientFlag`.** Detection differs
 between server and client; branching on it directly is a hydration error.
 
+**Never open the mic while the agent is speaking.** Recognition would
+transcribe the agent's own voice and reply to itself. See the voice section in
+ARCHITECTURE.md before touching `useVoiceChat`.
+
+**Memoise objects returned from hooks.** They land in effect dependency arrays;
+a fresh identity each render re-runs those effects on every render. This has
+already caused one real bug in the speech teardown.
+
 **Don't render model output as HTML.** `Markdown` deliberately omits
 `rehype-raw`. Answers come from a model; keep them inert.
 
@@ -126,7 +134,8 @@ the real domain before deploying.
 
 Done: the agent (chat, markdown, session restore, retry), the layered
 structure, the SEO foundation (metadata, JSON-LD, sitemap, robots, OG image),
-and browser-native voice in and out (Web Speech API, no backend, no cost).
+and hands-free browser-native voice conversation (Web Speech API, no backend,
+no cost) — the visitor talks, the agent answers aloud, and it listens again.
 
 Next: the real portfolio design and content. The UI so far is deliberately
 plain — the chat is themed entirely through `--agent-*` custom properties in

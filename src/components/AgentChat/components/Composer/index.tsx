@@ -2,8 +2,9 @@
 
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { MAX_MESSAGE_LENGTH } from "@/config/constants";
-import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
+import type { VoicePhase } from "@/hooks/useVoiceChat";
 import { MicButton } from "../MicButton";
+import { VoiceStatus } from "../VoiceStatus";
 import styles from "./style.module.css";
 
 export interface ComposerProps {
@@ -12,6 +13,13 @@ export interface ComposerProps {
   placeholder?: string;
   /** Max rows before the textarea starts scrolling. */
   maxRows?: number;
+  /** Hands-free voice mode. Omitted when the browser can't do it. */
+  voice?: {
+    phase: VoicePhase;
+    interim: string;
+    error: string | null;
+    onToggle: () => void;
+  };
 }
 
 /** Auto-growing input. Enter sends, Shift+Enter inserts a newline. */
@@ -20,20 +28,10 @@ export function Composer({
   disabled = false,
   placeholder = "Ask me anything…",
   maxRows = 6,
+  voice,
 }: ComposerProps) {
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  // Dictation appends to whatever is already typed rather than replacing it,
-  // so voice and keyboard can be mixed in one message.
-  const appendTranscript = useCallback((transcript: string) => {
-    setValue((current) => {
-      const next = current ? `${current.trimEnd()} ${transcript}` : transcript;
-      return next.slice(0, MAX_MESSAGE_LENGTH);
-    });
-  }, []);
-
-  const speech = useSpeechRecognition({ onResult: appendTranscript });
 
   // Resize to fit content, capped at `maxRows`.
   useLayoutEffect(() => {
@@ -50,10 +48,9 @@ export function Composer({
   const submit = useCallback(() => {
     const trimmed = value.trim();
     if (!trimmed || disabled) return;
-    speech.stop();
     onSubmit(trimmed);
     setValue("");
-  }, [value, disabled, onSubmit, speech]);
+  }, [value, disabled, onSubmit]);
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -71,18 +68,11 @@ export function Composer({
 
   return (
     <div className={styles.wrapper}>
-      {speech.isListening ? (
-        <p className={styles.interim} aria-live="polite">
-          {speech.interim || "Listening…"}
-        </p>
-      ) : null}
+      {voice ? <VoiceStatus phase={voice.phase} interim={voice.interim} /> : null}
 
-      {speech.error ? (
+      {voice?.error ? (
         <p className={styles.speechError} role="alert">
-          {speech.error}{" "}
-          <button type="button" onClick={speech.dismissError}>
-            Dismiss
-          </button>
+          {voice.error}
         </p>
       ) : null}
 
@@ -108,13 +98,7 @@ export function Composer({
         <div className={styles.actions}>
           {remaining < 200 ? <span className={styles.counter}>{remaining}</span> : null}
 
-          {speech.isSupported ? (
-            <MicButton
-              isListening={speech.isListening}
-              disabled={disabled}
-              onToggle={speech.toggle}
-            />
-          ) : null}
+          {voice ? <MicButton phase={voice.phase} onToggle={voice.onToggle} /> : null}
 
           <button
             type="submit"

@@ -19,6 +19,13 @@ interface SendMessageContext {
   sourceKey: readonly unknown[];
 }
 
+export interface UseSendMessageOptions {
+  /** Fired with the assistant's reply the moment it lands. */
+  onAssistantMessage?: (message: ChatMessage) => void;
+  /** Fired when the send fails. */
+  onError?: () => void;
+}
+
 /**
  * Sends a message and keeps the cached transcript in step.
  *
@@ -26,7 +33,10 @@ interface SendMessageContext {
  * rather than in component state, so it survives navigation and is shared
  * by every component reading the same session.
  */
-export function useSendMessage(identity: AgentIdentity) {
+export function useSendMessage(
+  identity: AgentIdentity,
+  { onAssistantMessage, onError }: UseSendMessageOptions = {},
+) {
   const queryClient = useQueryClient();
   const threadKey = queryKeys.conversation(identity.sessionId ?? DRAFT_THREAD);
 
@@ -56,7 +66,8 @@ export function useSendMessage(identity: AgentIdentity) {
       const settled = readThread().map((message) =>
         message.id === context.optimisticId ? { ...message, pending: false } : message,
       );
-      const next = [...settled, createMessage("assistant", response.answer)];
+      const assistantMessage = createMessage("assistant", response.answer);
+      const next = [...settled, assistantMessage];
 
       // The first reply mints the session id. Move the draft thread onto its
       // real key *before* saving the identity, so when the key changes the
@@ -68,9 +79,13 @@ export function useSendMessage(identity: AgentIdentity) {
       }
 
       saveIdentity({ userId: response.user_id, sessionId: response.session_id });
+
+      // Notified last, so listeners observe a cache that is already correct.
+      onAssistantMessage?.(assistantMessage);
     },
 
     onError: (_error, _variables, context) => {
+      onError?.();
       if (!context) return;
       writeThread(
         context.sourceKey,
