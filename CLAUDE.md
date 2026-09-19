@@ -88,6 +88,9 @@ name, so a page sets only its own title.
 
 **Add new routes to `app/sitemap.ts`.** Nothing does this automatically.
 
+**Feature-detect browser APIs through `useClientFlag`.** Detection differs
+between server and client; branching on it directly is a hydration error.
+
 **Don't render model output as HTML.** `Markdown` deliberately omits
 `rehype-raw`. Answers come from a model; keep them inert.
 
@@ -122,8 +125,8 @@ the real domain before deploying.
 ## Status
 
 Done: the agent (chat, markdown, session restore, retry), the layered
-structure, and the SEO foundation (metadata, JSON-LD, sitemap, robots, OG
-image).
+structure, the SEO foundation (metadata, JSON-LD, sitemap, robots, OG image),
+and browser-native voice in and out (Web Speech API, no backend, no cost).
 
 Next: the real portfolio design and content. The UI so far is deliberately
 plain — the chat is themed entirely through `--agent-*` custom properties in

@@ -198,6 +198,46 @@ The transcript lives in the React Query cache under
 - A `404` on restore clears the dead session instead of pinning the visitor
   to it.
 
+### Voice (phase 1: browser-native)
+
+Speech-to-text and text-to-speech both use the Web Speech API — no backend,
+no cost. Chrome, Edge and Safari support it; Firefox does not, so every
+entry point is feature-detected and the UI simply omits the control.
+
+| Piece | File |
+| --- | --- |
+| Recognition types + detection | `utils/speechRecognition.ts` |
+| Synthesis store (shared global) | `utils/speechSynthesis.ts` |
+| Markdown stripping + chunking | `utils/text.ts` |
+| Push-to-talk hook | `hooks/useSpeechRecognition.ts` |
+| Playback hook | `hooks/useTextToSpeech.ts` |
+| Mic / speak buttons | `components/AgentChat/components/{MicButton,SpeakButton}` |
+
+Things that are the way they are for a reason:
+
+- **Feature detection goes through `useClientFlag`.** Detection returns
+  false on the server and true in the browser; branching on it directly
+  renders a mic button in one pass and not the other, which React rejects
+  as a hydration error. `useSyncExternalStore` is the supported escape.
+- **Synthesis state lives in an external store, not component state.**
+  `window.speechSynthesis` is a single global — two components each with
+  their own "is it speaking?" would disagree the moment one started.
+- **Long answers are spoken as a queue of short utterances.** Chrome
+  silently truncates a single utterance after roughly 15 seconds.
+- **Answers are stripped of markdown before speaking.** Raw markdown reads
+  as punctuation soup; code blocks are announced, not spelled out.
+- **Dictation fills the composer, it does not auto-send.** Recognition
+  misfires, and sending a wrong transcript is worse than one extra click.
+  Change `appendTranscript` in `Composer` if you want auto-send.
+- **Auto-speak never fires on load.** The "spoken" marker is seeded on the
+  first run so restored history and the greeting stay silent — browsers
+  block audio without a user gesture anyway.
+
+Phase 2 (server TTS for a natural voice) is not built. If you add it, do
+**not** accept arbitrary text at an endpoint — that makes the site a free
+TTS service anyone can bill to you. Speak by message id instead, which
+needs ids added to the backend schema first.
+
 ### Theming
 
 Override any `--agent-*` property from your own stylesheet:

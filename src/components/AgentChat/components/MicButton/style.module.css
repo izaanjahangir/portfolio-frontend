@@ -1,0 +1,40 @@
+.mic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--agent-border, #d4d4d8);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--agent-muted, #71717a);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.mic:not(:disabled):hover {
+  color: var(--agent-fg, inherit);
+  background: var(--agent-surface, rgba(127, 127, 127, 0.1));
+}
+
+.mic:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.listening,
+.listening:not(:disabled):hover {
+  color: #fff;
+  background: var(--agent-danger, #dc2626);
+  border-color: transparent;
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--agent-danger, #dc2626) 55%, transparent); }
+  50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--agent-danger, #dc2626) 0%, transparent); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .listening { animation: none; }
+}

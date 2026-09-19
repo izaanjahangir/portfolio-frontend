@@ -1,6 +1,8 @@
 .row {
   display: flex;
   width: 100%;
+  align-items: flex-end;
+  gap: 0.25rem;
 }
 
 .user { justify-content: flex-end; }
@@ -38,4 +40,11 @@
   overflow-wrap: anywhere;
   font-size: 0.95rem;
   line-height: 1.55;
+}
+
+/* Sits beside the bubble so it never reflows the text. */
+.actions {
+  display: flex;
+  align-items: center;
+  padding-bottom: 0.15rem;
 }
