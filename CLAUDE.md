@@ -27,11 +27,18 @@ setState called synchronously in an effect body and refs mutated during render.
 
 ## Git
 
-**Commit directly to `main`. Never create feature branches, and don't ask
-whether to branch.** Izaan is the only developer here, so there is no reviewer
-and no PR workflow — a branch just adds a merge step.
+**Never commit on your own initiative. Always ask first and wait for a clear
+yes**, even when the work is finished, verified, and obviously commit-worthy.
+Finishing a task is not permission to commit it. Permission given once covers
+that commit only, never the next one.
 
-Still only commit when asked.
+**When told to commit, commit directly to `main`.** Never create feature
+branches, and don't ask whether to branch — Izaan is the only developer here,
+so there is no reviewer and no PR workflow, and a branch just adds a merge
+step.
+
+These two rules are separate: the first governs *when* to commit, the second
+*where*. A "yes" to the first never implies standing permission.
 
 ## Structure
 
