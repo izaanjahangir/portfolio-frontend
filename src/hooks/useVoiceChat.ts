@@ -5,8 +5,8 @@ import { useAgentChat, type UseAgentChat, type UseAgentChatOptions } from "./use
 import { useSpeechRecognition } from "./useSpeechRecognition";
 import { useTextToSpeech } from "./useTextToSpeech";
 import { isFarewell, looksLikeQuestion } from "@/utils/intent";
-import { markdownToPlainText } from "@/utils/text";
-import { stopSpeaking } from "@/utils/speechSynthesis";
+import { markdownToPlainText, takeSpeakableChunk } from "@/utils/text";
+import { speakStream, stopSpeaking, type SpeechStream } from "@/utils/speechSynthesis";
 import type { ChatMessage } from "@/types";
 
 /**
@@ -64,6 +64,10 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
    * sign-off — and voice mode closes once it finishes.
    */
   const endAfterReplyRef = useRef(false);
+  /** Live speech session for the reply currently arriving. */
+  const streamRef = useRef<SpeechStream | null>(null);
+  /** Streamed markdown not yet released to the speaker. */
+  const bufferRef = useRef("");
   // Set from effects below: these callbacks are defined before the values
   // they need exist, so they reach them through refs.
   const restartListeningRef = useRef<() => void>(() => {});
@@ -83,6 +87,7 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
       if (phaseRef.current !== "listening") return;
       silentTurnsRef.current = 0;
       endAfterReplyRef.current = isFarewell(transcript);
+      bufferRef.current = "";
       toPhase("thinking");
       sendRef.current(transcript);
     },
@@ -118,11 +123,57 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
 
   // --- speaking --------------------------------------------------------
 
-  const handleAssistantMessage = useCallback(
-    (message: ChatMessage) => {
+  /**
+   * Starts speaking before the answer exists.
+   *
+   * Waiting for the full reply meant the visitor heard nothing for the
+   * whole generation — 10-30s on a complex question. Opening the speech
+   * session here and feeding it sentence by sentence removes almost all of
+   * that: the agent starts talking a beat after the first sentence lands.
+   */
+  const handleAssistantStart = useCallback(
+    (messageId: string) => {
       if (phaseRef.current !== "thinking") return;
 
-      const text = markdownToPlainText(message.content);
+      toPhase("speaking");
+      speakingIdRef.current = messageId;
+      bufferRef.current = "";
+
+      streamRef.current = speakStream(messageId, {
+        // The language is only known when `done` arrives, so the opening
+        // sentences use the default and `setLanguage` corrects the rest.
+        onEnd: () => {
+          streamRef.current = null;
+          speakingIdRef.current = null;
+          // Only continue if the visitor has not left voice mode meanwhile.
+          if (phaseRef.current !== "speaking") return;
+          if (endAfterReplyRef.current) {
+            stopRef.current();
+            return;
+          }
+          toPhase("listening");
+          restartListeningRef.current();
+        },
+      });
+    },
+    [toPhase],
+  );
+
+  /** Releases complete sentences to the speaker as they arrive. */
+  const handleAssistantDelta = useCallback((messageId: string, chunk: string) => {
+    const stream = streamRef.current;
+    if (!stream || speakingIdRef.current !== messageId) return;
+
+    bufferRef.current += chunk;
+    const { ready, rest } = takeSpeakableChunk(bufferRef.current);
+    bufferRef.current = rest;
+
+    if (ready.trim()) stream.push(markdownToPlainText(ready));
+  }, []);
+
+  const handleAssistantMessage = useCallback(
+    (message: ChatMessage) => {
+      const stream = streamRef.current;
 
       /**
        * The agent decides whether the conversation is over; the keyword
@@ -136,36 +187,48 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
        * intermittently, and hanging up on "what's your email?" is the
        * worst outcome available.
        */
+      const spoken = markdownToPlainText(message.content);
       const serverVerdict = message.metadata?.end_of_conversation;
-      const shouldEnd =
-        serverVerdict ?? (endAfterReplyRef.current && !looksLikeQuestion(text));
+      endAfterReplyRef.current =
+        serverVerdict ?? (endAfterReplyRef.current && !looksLikeQuestion(spoken));
 
-      /** Where the loop goes once the agent has finished talking. */
+      // The common path: a session is already speaking this reply, so just
+      // flush the tail and let its `onEnd` decide what happens next.
+      if (stream && speakingIdRef.current === message.id) {
+        stream.setLanguage(message.metadata?.language);
+        const tail = bufferRef.current;
+        bufferRef.current = "";
+        if (tail.trim()) stream.push(markdownToPlainText(tail));
+        stream.close();
+        return;
+      }
+
+      // No live session — the reply arrived without a `start` event, or
+      // voice mode was entered mid-flight. Fall back to speaking it whole.
+      if (phaseRef.current !== "thinking") return;
+
       const afterReply = () => {
-        if (shouldEnd) {
+        if (endAfterReplyRef.current) {
           stopRef.current();
           return;
         }
         toPhase("listening");
         recognition.start();
       };
-      if (!text) {
+
+      if (!spoken) {
         afterReply();
         return;
       }
 
-      // Belt and braces: the mic should already be closed here.
       recognition.stop();
       toPhase("speaking");
       speakingIdRef.current = message.id;
 
-      speech.speak(message.id, text, {
-        // Spoken in the language the agent answered in, not the one it was
-        // asked in — otherwise a German answer is read with an English voice.
+      speech.speak(message.id, spoken, {
         lang: message.metadata?.language,
         onEnd: () => {
           speakingIdRef.current = null;
-          // Only continue if the visitor has not left voice mode meanwhile.
           if (phaseRef.current !== "speaking") return;
           afterReply();
         },
@@ -175,13 +238,20 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
   );
 
   const handleSendError = useCallback(() => {
-    if (phaseRef.current === "thinking") toPhase("idle");
-  }, [toPhase]);
+    // Now that speech begins before the answer is complete, a failure can
+    // land mid-sentence. Tearing the whole loop down covers both cases and
+    // guarantees the live speech session can't be left open with nothing
+    // to drain it, which would hang the loop in `speaking` forever.
+    if (phaseRef.current === "idle") return;
+    stopRef.current();
+  }, []);
 
   // --- chat ------------------------------------------------------------
 
   const chat = useAgentChat({
     ...options,
+    onAssistantStart: handleAssistantStart,
+    onAssistantDelta: handleAssistantDelta,
     onAssistantMessage: handleAssistantMessage,
     onSendError: handleSendError,
   });
@@ -197,6 +267,7 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
     if (phaseRef.current !== "idle") return;
     silentTurnsRef.current = 0;
     endAfterReplyRef.current = false;
+    bufferRef.current = "";
     toPhase("listening");
     recognition.start();
   }, [recognition, toPhase]);
@@ -205,6 +276,8 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
     silentTurnsRef.current = 0;
     speakingIdRef.current = null;
     endAfterReplyRef.current = false;
+    streamRef.current = null;
+    bufferRef.current = "";
     toPhase("idle");
     recognition.stop();
     speech.stop();

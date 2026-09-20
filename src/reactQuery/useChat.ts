@@ -15,6 +15,10 @@ interface SendMessageVariables {
 }
 
 export interface UseSendMessageOptions {
+  /** Fired when the reply starts arriving, before any text. */
+  onAssistantStart?: (messageId: string) => void;
+  /** Fired per chunk, with **new** text only. */
+  onAssistantDelta?: (messageId: string, chunk: string) => void;
   /** Fired with the assistant's reply once the stream completes. */
   onAssistantMessage?: (message: ChatMessage) => void;
   /** Fired when the send fails. */
@@ -33,7 +37,12 @@ export interface UseSendMessageOptions {
  */
 export function useSendMessage(
   identity: AgentIdentity,
-  { onAssistantMessage, onError }: UseSendMessageOptions = {},
+  {
+    onAssistantStart,
+    onAssistantDelta,
+    onAssistantMessage,
+    onError,
+  }: UseSendMessageOptions = {},
 ) {
   const queryClient = useQueryClient();
 
@@ -101,6 +110,7 @@ export function useSendMessage(
               ]);
 
               saveIdentity({ userId: event.user_id, sessionId: event.session_id });
+              onAssistantStart?.(event.message_id);
             },
 
             onDelta: (chunk) => {
@@ -109,6 +119,7 @@ export function useSendMessage(
                 ...message,
                 content: message.content + chunk,
               }));
+              onAssistantDelta?.(assistantId, chunk);
             },
           },
         );

@@ -288,6 +288,30 @@ next question, and the conversation would talk to itself indefinitely.
 Every transition into `speaking` stops recognition first, and listening
 only resumes from the utterance's `onEnd`.
 
+#### Speaking while the answer is still arriving
+
+Speech starts on the stream's `start` event, not when the answer is
+complete. `speakStream` opens a queue, each `delta` adds to a buffer, and
+`takeSpeakableChunk` releases it a sentence at a time. On a long answer the
+first words are heard ~12s earlier than they used to be — the whole
+generation time used to be silence.
+
+Guards in `takeSpeakableChunk`:
+
+- Nothing is released mid-sentence; a half-sentence read aloud then paused
+  sounds broken.
+- An unterminated code fence is held, since "(code sample)" needs both
+  fences and speaking early reads raw backticks aloud.
+- A marker split across network chunks (`` `` `` of a `` ``` ``, the first
+  `*` of a `**`) is held, because it reads as ordinary text until its other
+  half arrives. Verified leak-free down to one-character chunks.
+- A long run with no punctuation is force-flushed at a word break rather
+  than stalling speech indefinitely.
+
+`metadata.language` only arrives with `done`, so the opening sentences use
+the default voice and `setLanguage` corrects the remainder. A non-English
+answer therefore starts in an English voice — the cost of not waiting.
+
 #### Other things that are the way they are for a reason
 
 - **The loop runs on callbacks, not effects.** An effect watching "has a
@@ -305,6 +329,10 @@ only resumes from the utterance's `onEnd`.
   mid-sentence, leaving the loop stuck.
 - **Feature detection goes through `useClientFlag`.** Detection differs
   between server and client; branching on it directly is a hydration error.
+- **A send failure tears the whole loop down.** Now that speech begins
+  before the answer is complete, a failure can land mid-sentence; stopping
+  everything guarantees the live speech session can't be left open with
+  nothing to drain it, which would hang the loop in `speaking` forever.
 - **Three consecutive silent turns end voice mode**, so a forgotten open
   mic doesn't sit there indefinitely.
 - **Saying goodbye ends voice mode**, but only after the agent's reply has

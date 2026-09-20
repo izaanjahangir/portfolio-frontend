@@ -25,6 +25,10 @@ export interface UseAgentChatOptions {
   greeting?: string;
   /** Rehydrate the stored session on mount. Default: true. */
   restoreSession?: boolean;
+  /** Fired when the reply starts arriving, before any text. */
+  onAssistantStart?: (messageId: string) => void;
+  /** Fired per streamed chunk, with new text only. */
+  onAssistantDelta?: (messageId: string, chunk: string) => void;
   /** Fired with the assistant's reply the moment it lands. */
   onAssistantMessage?: (message: ChatMessage) => void;
   /** Fired when a send fails. */
@@ -50,13 +54,22 @@ export interface UseAgentChat {
 }
 
 export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChat {
-  const { greeting, restoreSession = true, onAssistantMessage, onSendError } = options;
+  const {
+    greeting,
+    restoreSession = true,
+    onAssistantStart,
+    onAssistantDelta,
+    onAssistantMessage,
+    onSendError,
+  } = options;
 
   const queryClient = useQueryClient();
   const identity = useIdentity();
 
   const conversation = useConversation(identity.sessionId, restoreSession);
   const sendMutation = useSendMessage(identity, {
+    onAssistantStart,
+    onAssistantDelta,
     onAssistantMessage,
     onError: onSendError,
   });

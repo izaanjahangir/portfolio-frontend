@@ -91,6 +91,11 @@ name, so a page sets only its own title.
 **Feature-detect browser APIs through `useClientFlag`.** Detection differs
 between server and client; branching on it directly is a hydration error.
 
+**Speech starts before the answer is complete.** `speakStream` queues
+sentences as deltas arrive. Anything that can end a reply — success, error,
+or the visitor stopping — must close or cancel that session, or the loop
+hangs in `speaking` forever.
+
 **Never open the mic while the agent is speaking.** Recognition would
 transcribe the agent's own voice and reply to itself. See the voice section in
 ARCHITECTURE.md before touching `useVoiceChat`.
