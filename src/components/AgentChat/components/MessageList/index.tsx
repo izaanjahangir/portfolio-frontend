@@ -30,7 +30,10 @@ export function MessageList({ messages, isSending, emptyState }: MessageListProp
         <MessageItem key={message.id} message={message} />
       ))}
 
-      {isSending ? <TypingIndicator /> : null}
+      {/* Once deltas arrive the answer itself is the progress indicator. */}
+      {isSending && !messages.some((message) => message.streaming) ? (
+        <TypingIndicator />
+      ) : null}
 
       <div ref={endRef} />
     </div>

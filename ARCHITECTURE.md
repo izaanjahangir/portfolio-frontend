@@ -186,6 +186,66 @@ That proxy uses `fetch`, not the axios instance, on purpose: the instance's
 interceptor unwraps envelopes and throws on non-2xx, which is exactly wrong
 for a byte passthrough that must forward 422s intact.
 
+### Streaming
+
+`POST /api/chat/stream` returns Server-Sent Events. `start` carries the ids
+before generation begins, `delta` events carry **new text only**, and `done`
+carries `finish_reason` plus the metadata object.
+
+| Piece | File |
+| --- | --- |
+| SSE frame parser | `utils/sse.ts` |
+| Stream client | `apiService/chat.ts` → `postChatStream` |
+| Cache writes per delta | `reactQuery/useChat.ts` |
+
+Things worth knowing:
+
+- **The stream uses `fetch`, not the axios instance.** Browser axios buffers
+  the whole response before resolving, so nothing would arrive
+  incrementally, and the envelope-unwrapping interceptor is wrong for SSE
+  frames anyway. `postChat` (non-streaming) still uses axios.
+- **All cache writes live inside `mutationFn`**, not split across
+  onMutate/onSuccess. A stream mutates the same message repeatedly and the
+  session it belongs to can change partway through (the draft migration),
+  so one place holding the live key is much easier to follow.
+- **The assistant bubble is created on `start`, using the backend's
+  `message_id`.** The id therefore never changes mid-stream and React never
+  remounts the bubble.
+- **Network chunks split anywhere** — mid-frame, mid-line, mid-UTF-8
+  character. `utils/sse.ts` buffers until a blank line and decodes with
+  `stream: true`.
+- **Deltas can arrive with leading whitespace**, so the assembled answer is
+  trimmed.
+- **A stream that ends without `done` is an error**, not a short answer.
+  Half a reply must never be presented as complete.
+- On failure, an assistant bubble with no real text is removed; a partial
+  answer is kept, since the visitor already read it.
+
+### Response metadata
+
+`ChatResponse` and each `MessageOut` may carry a `ResponseMetadata`:
+`end_of_conversation`, `language`, `awaiting_input`.
+
+Precedence for ending a voice conversation:
+
+| Backend says | Behaviour |
+| --- | --- |
+| `end_of_conversation: true` | End after the reply is spoken |
+| `end_of_conversation: false` | Keep listening — **not** overridden by keywords |
+| `metadata` absent or `null` | Fall back to keyword matching, unless the reply ends in a question |
+
+`false` is authoritative on purpose: the agent may have just asked for
+something it needs, which a keyword match cannot know.
+
+**The backend omits metadata intermittently** — observed returning `null` on
+the streaming `done` event for a message that returned correct metadata on
+retry and on the non-streaming endpoint. The fallback therefore has to stay,
+and it ignores a farewell when the agent's reply ends in a question, because
+hanging up on "what's your email?" is the worst outcome available.
+
+`language` is passed to speech synthesis, so a German answer is spoken with
+a German voice instead of an English one mangling it.
+
 ### Cache behaviour
 
 The transcript lives in the React Query cache under

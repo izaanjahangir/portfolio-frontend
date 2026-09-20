@@ -107,6 +107,15 @@ already caused one real bug in the speech teardown.
 what lets Next dead-code-eliminate the devtools import. Hoisting it into a
 variable ships them to production.
 
+**Streaming uses `fetch`, not axios.** Browser axios buffers the whole
+response before resolving, so nothing arrives incrementally, and the
+envelope interceptor is wrong for SSE frames. `postChat` still uses axios.
+
+**Backend metadata wins over the keyword fallback.** `end_of_conversation:
+false` must never be overridden by the client's own guess — only a missing
+or null metadata object falls back. The backend omits it intermittently, so
+the fallback cannot be deleted.
+
 **The proxy uses `fetch`, not axios, on purpose.**
 `app/api/agent/[...path]/route.ts` forwards bytes untouched. The axios instance
 unwraps envelopes and throws on non-2xx — exactly wrong for a passthrough that
@@ -132,10 +141,12 @@ the real domain before deploying.
 
 ## Status
 
-Done: the agent (chat, markdown, session restore, retry), the layered
-structure, the SEO foundation (metadata, JSON-LD, sitemap, robots, OG image),
-and hands-free browser-native voice conversation (Web Speech API, no backend,
-no cost) — the visitor talks, the agent answers aloud, and it listens again.
+Done: the agent (streaming chat over SSE, markdown, session restore, retry),
+the layered structure, the SEO foundation (metadata, JSON-LD, sitemap,
+robots, OG image), and hands-free browser-native voice conversation (Web
+Speech API, no backend, no cost) — the visitor talks, the agent answers
+aloud, and it listens again. The agent's `end_of_conversation` and
+`language` metadata drive when voice mode closes and which voice speaks.
 
 Next: the real portfolio design and content. The UI so far is deliberately
 plain — the chat is themed entirely through `--agent-*` custom properties in

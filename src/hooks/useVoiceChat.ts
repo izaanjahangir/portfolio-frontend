@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAgentChat, type UseAgentChat, type UseAgentChatOptions } from "./useAgentChat";
 import { useSpeechRecognition } from "./useSpeechRecognition";
 import { useTextToSpeech } from "./useTextToSpeech";
-import { isFarewell } from "@/utils/intent";
+import { isFarewell, looksLikeQuestion } from "@/utils/intent";
 import { markdownToPlainText } from "@/utils/text";
 import { stopSpeaking } from "@/utils/speechSynthesis";
 import type { ChatMessage } from "@/types";
@@ -58,8 +58,9 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
   const sendRef = useRef<(text: string) => void>(() => {});
   const speakingIdRef = useRef<string | null>(null);
   /**
-   * Set when the visitor says goodbye. The reply is still spoken — ending
-   * the loop the moment they say "bye" would talk over the agent's
+   * The client's own guess that the visitor said goodbye, used only when
+   * the backend sends no metadata. The reply is still spoken either way —
+   * ending the loop the moment "bye" is heard would talk over the agent's
    * sign-off — and voice mode closes once it finishes.
    */
   const endAfterReplyRef = useRef(false);
@@ -121,17 +122,33 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
     (message: ChatMessage) => {
       if (phaseRef.current !== "thinking") return;
 
+      const text = markdownToPlainText(message.content);
+
+      /**
+       * The agent decides whether the conversation is over; the keyword
+       * guess only fills in when it said nothing.
+       *
+       * `false` is authoritative and deliberately not overridden — the
+       * agent may have just asked a question it needs answered, which a
+       * keyword match cannot know. Only a missing (or null) metadata
+       * object falls back, and even then a reply that ends in a question
+       * keeps the mic open: the backend has been seen to omit metadata
+       * intermittently, and hanging up on "what's your email?" is the
+       * worst outcome available.
+       */
+      const serverVerdict = message.metadata?.end_of_conversation;
+      const shouldEnd =
+        serverVerdict ?? (endAfterReplyRef.current && !looksLikeQuestion(text));
+
       /** Where the loop goes once the agent has finished talking. */
       const afterReply = () => {
-        if (endAfterReplyRef.current) {
+        if (shouldEnd) {
           stopRef.current();
           return;
         }
         toPhase("listening");
         recognition.start();
       };
-
-      const text = markdownToPlainText(message.content);
       if (!text) {
         afterReply();
         return;
@@ -143,6 +160,9 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
       speakingIdRef.current = message.id;
 
       speech.speak(message.id, text, {
+        // Spoken in the language the agent answered in, not the one it was
+        // asked in — otherwise a German answer is read with an English voice.
+        lang: message.metadata?.language,
         onEnd: () => {
           speakingIdRef.current = null;
           // Only continue if the visitor has not left voice mode meanwhile.

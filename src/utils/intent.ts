@@ -52,3 +52,16 @@ export function isFarewell(text: string): boolean {
   const tail = normalized.split(" ").slice(-TAIL_WORDS).join(" ");
   return FAREWELL_PATTERNS.some((pattern) => pattern.test(tail));
 }
+
+/**
+ * True when the agent's reply ends in a question.
+ *
+ * Used only on the fallback path, when the backend sent no metadata: an
+ * answer that asks something almost certainly needs one back, so a
+ * keyword-matched "goodbye" should not hang up on it. When the backend
+ * does report `end_of_conversation`, that verdict wins and this is not
+ * consulted — the agent knows better than a heuristic.
+ */
+export function looksLikeQuestion(text: string): boolean {
+  return /\?["')\]]*\s*$/.test(text.trim());
+}

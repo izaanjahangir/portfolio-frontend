@@ -48,3 +48,24 @@
   align-items: center;
   padding-bottom: 0.15rem;
 }
+
+/* Blinking caret while the answer streams in. */
+.cursor {
+  display: inline-block;
+  width: 0.5em;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: currentColor;
+  opacity: 0.7;
+  animation: caret 1s step-end infinite;
+}
+
+@keyframes caret {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cursor { animation: none; }
+}

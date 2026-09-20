@@ -35,6 +35,8 @@ export interface UseAgentChat {
   messages: ChatMessage[];
   /** True while the agent is composing an answer. */
   isSending: boolean;
+  /** True once the answer has started arriving. */
+  isStreaming: boolean;
   /** True while the stored conversation is being restored. */
   isRestoring: boolean;
   error: string | null;
@@ -72,6 +74,11 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChat {
     return thread;
   }, [conversation.data, greetingMessage]);
 
+  const isStreaming = useMemo(
+    () => messages.some((message) => message.streaming),
+    [messages],
+  );
+
   const sendMessage = useCallback(
     (text: string) => {
       const trimmed = text.trim();
@@ -85,14 +92,14 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChat {
     if (sendMutation.isPending) return;
 
     const thread = queryClient.getQueryData<ChatMessage[]>(threadKey) ?? [];
-    const lastUserMessage = [...thread].reverse().find((m) => m.role === "user");
-    if (!lastUserMessage) return;
+    const lastUserIndex = thread.map((m) => m.role).lastIndexOf("user");
+    if (lastUserIndex === -1) return;
 
-    // Drop the failed attempt; `onMutate` re-adds it optimistically.
-    queryClient.setQueryData<ChatMessage[]>(
-      threadKey,
-      thread.filter((message) => message.id !== lastUserMessage.id),
-    );
+    const lastUserMessage = thread[lastUserIndex];
+
+    // Drop the failed attempt *and* any partial reply after it; the send
+    // re-adds the question optimistically.
+    queryClient.setQueryData<ChatMessage[]>(threadKey, thread.slice(0, lastUserIndex));
     sendMutation.mutate({ text: lastUserMessage.content });
   }, [sendMutation, queryClient, threadKey]);
 
@@ -115,6 +122,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChat {
   return {
     messages,
     isSending: sendMutation.isPending,
+    isStreaming,
     isRestoring: conversation.isLoading,
     error,
     identity,

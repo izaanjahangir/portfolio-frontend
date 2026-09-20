@@ -28,12 +28,19 @@ export function createMessage(
   };
 }
 
-/** Maps the backend's conversation history onto client messages. */
+/**
+ * Maps the backend's conversation history onto client messages.
+ *
+ * The backend's own id is used, so a message keeps the same identity across
+ * reloads — which is what per-message features (speech playback, and later
+ * server-side audio) key off.
+ */
 export function fromMessageOut(messages: MessageOut[]): ChatMessage[] {
   return messages.map((message) => ({
-    id: createMessageId("history"),
+    id: message.id || createMessageId("history"),
     role: normalizeRole(message.role),
     content: message.content,
     createdAt: message.created_at,
+    metadata: message.metadata ?? null,
   }));
 }

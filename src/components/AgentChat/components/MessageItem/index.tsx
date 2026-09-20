@@ -23,7 +23,8 @@ export function MessageItem({ message }: MessageItemProps) {
     [isUser, message.content],
   );
 
-  const canSpeak = !isUser && isSupported && spokenText.length > 0;
+  // Nothing to speak until the answer is complete.
+  const canSpeak = !isUser && !message.streaming && isSupported && spokenText.length > 0;
 
   return (
     <div
@@ -38,7 +39,10 @@ export function MessageItem({ message }: MessageItemProps) {
         {isUser ? (
           <p className={styles.plain}>{message.content}</p>
         ) : (
-          <Markdown>{message.content}</Markdown>
+          <>
+            <Markdown>{message.content}</Markdown>
+            {message.streaming ? <span className={styles.cursor} aria-hidden="true" /> : null}
+          </>
         )}
       </div>
 

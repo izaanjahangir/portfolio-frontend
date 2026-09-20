@@ -113,7 +113,8 @@ export function stopSpeaking(): void {
 }
 
 export interface SpeakOptions {
-  lang?: string;
+  /** BCP-47 tag. Falls back to English when the agent didn't say. */
+  lang?: string | null;
   /**
    * Called once the whole queue finishes naturally. Not called when
    * playback is cancelled or superseded — the voice loop relies on that
@@ -127,7 +128,8 @@ export interface SpeakOptions {
  * message is talking. Speaking anything stops whatever came before.
  */
 export function speak(id: string, text: string, options: SpeakOptions = {}): void {
-  const { lang = "en-US", onEnd } = options;
+  const { lang, onEnd } = options;
+  const language = lang || "en-US";
 
   if (!isSpeechSynthesisSupported()) {
     onEnd?.();
@@ -170,7 +172,7 @@ export function speak(id: string, text: string, options: SpeakOptions = {}): voi
     index += 1;
 
     const utterance = new SpeechSynthesisUtterance(chunk);
-    utterance.lang = lang;
+    utterance.lang = language;
 
     utterance.onend = () => {
       clearWatchdog();

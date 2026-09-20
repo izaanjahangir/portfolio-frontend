@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { postChat } from "@/apiService/chat";
+import { postChatStream } from "@/apiService/chat";
 import { DRAFT_THREAD } from "@/config/constants";
 import { createMessage } from "@/utils/messages";
 import { saveIdentity } from "@/utils/identity";
@@ -14,87 +14,153 @@ interface SendMessageVariables {
   text: string;
 }
 
-interface SendMessageContext {
-  optimisticId: string;
-  sourceKey: readonly unknown[];
-}
-
 export interface UseSendMessageOptions {
-  /** Fired with the assistant's reply the moment it lands. */
+  /** Fired with the assistant's reply once the stream completes. */
   onAssistantMessage?: (message: ChatMessage) => void;
   /** Fired when the send fails. */
   onError?: () => void;
 }
 
 /**
- * Sends a message and keeps the cached transcript in step.
+ * Sends a message and keeps the cached transcript in step as the answer
+ * streams in.
  *
- * The transcript lives in the React Query cache under the conversation key
- * rather than in component state, so it survives navigation and is shared
- * by every component reading the same session.
+ * All cache writes happen inside `mutationFn` rather than being split
+ * across onMutate/onSuccess: a stream mutates the same message many times,
+ * and the session id it belongs to can change partway through (see the
+ * draft migration below), so one place holding the live key is far easier
+ * to follow than callbacks each re-deriving it.
  */
 export function useSendMessage(
   identity: AgentIdentity,
   { onAssistantMessage, onError }: UseSendMessageOptions = {},
 ) {
   const queryClient = useQueryClient();
-  const threadKey = queryKeys.conversation(identity.sessionId ?? DRAFT_THREAD);
 
-  const readThread = (key: readonly unknown[] = threadKey): ChatMessage[] =>
+  const read = (key: readonly unknown[]): ChatMessage[] =>
     queryClient.getQueryData<ChatMessage[]>(key) ?? [];
 
-  const writeThread = (key: readonly unknown[], messages: ChatMessage[]) => {
+  const write = (key: readonly unknown[], messages: ChatMessage[]) => {
     queryClient.setQueryData<ChatMessage[]>(key, messages);
   };
 
-  return useMutation<ChatResponse, Error, SendMessageVariables, SendMessageContext>({
-    mutationFn: ({ text }) =>
-      postChat({
-        message: text,
-        user_id: identity.userId,
-        session_id: identity.sessionId,
-      }),
+  const patch = (
+    key: readonly unknown[],
+    id: string,
+    update: (message: ChatMessage) => ChatMessage,
+  ) => {
+    write(
+      key,
+      read(key).map((message) => (message.id === id ? update(message) : message)),
+    );
+  };
 
-    // Show the visitor's message immediately.
-    onMutate: ({ text }) => {
-      const optimistic = createMessage("user", text, { pending: true });
-      writeThread(threadKey, [...readThread(), optimistic]);
-      return { optimisticId: optimistic.id, sourceKey: threadKey };
-    },
+  return useMutation<ChatResponse, Error, SendMessageVariables>({
+    mutationFn: async ({ text }) => {
+      // The thread may still be the draft; `start` tells us where it really
+      // lives, and this is reassigned at that point.
+      let key = queryKeys.conversation(identity.sessionId ?? DRAFT_THREAD);
 
-    onSuccess: (response, _variables, context) => {
-      const settled = readThread().map((message) =>
-        message.id === context.optimisticId ? { ...message, pending: false } : message,
-      );
-      const assistantMessage = createMessage("assistant", response.answer);
-      const next = [...settled, assistantMessage];
+      const userMessage = createMessage("user", text, { pending: true });
+      write(key, [...read(key), userMessage]);
 
-      // The first reply mints the session id. Move the draft thread onto its
-      // real key *before* saving the identity, so when the key changes the
-      // query finds fresh data and never refetches what we already have.
-      writeThread(queryKeys.conversation(response.session_id), next);
+      let assistantId: string | null = null;
 
-      if (context.sourceKey[2] !== response.session_id) {
-        queryClient.removeQueries({ queryKey: context.sourceKey, exact: true });
+      try {
+        const response = await postChatStream(
+          {
+            message: text,
+            user_id: identity.userId,
+            session_id: identity.sessionId,
+          },
+          {
+            onStart: (event) => {
+              // The first reply of a conversation mints the session id. Move
+              // the draft thread onto its real key *before* saving identity,
+              // so the query re-points onto data that is already correct and
+              // never refetches what we are in the middle of streaming.
+              const destination = queryKeys.conversation(event.session_id);
+              if (destination[2] !== key[2]) {
+                write(destination, read(key));
+                queryClient.removeQueries({ queryKey: key, exact: true });
+                key = destination;
+              }
+
+              // Using the backend's id from the outset means it never
+              // changes mid-stream and React never remounts the bubble.
+              assistantId = event.message_id;
+              write(key, [
+                ...read(key),
+                {
+                  id: event.message_id,
+                  role: "assistant",
+                  content: "",
+                  createdAt: new Date().toISOString(),
+                  streaming: true,
+                },
+              ]);
+
+              saveIdentity({ userId: event.user_id, sessionId: event.session_id });
+            },
+
+            onDelta: (chunk) => {
+              if (!assistantId) return;
+              patch(key, assistantId, (message) => ({
+                ...message,
+                content: message.content + chunk,
+              }));
+            },
+          },
+        );
+
+        patch(key, userMessage.id, (message) => ({ ...message, pending: false }));
+
+        const settled: ChatMessage = {
+          id: response.message_id,
+          role: "assistant",
+          content: response.answer,
+          createdAt: new Date().toISOString(),
+          metadata: response.metadata ?? null,
+        };
+
+        if (assistantId) {
+          patch(key, assistantId, () => settled);
+        } else {
+          // No `start` arrived but the call resolved — keep the answer.
+          write(key, [...read(key), settled]);
+        }
+
+        // Notified last, so listeners observe a cache that is already correct.
+        onAssistantMessage?.(settled);
+        return response;
+      } catch (cause) {
+        patch(key, userMessage.id, (message) => ({
+          ...message,
+          pending: false,
+          error: true,
+        }));
+
+        // Drop an assistant bubble that never received real text; keep a
+        // partial answer, since the visitor already saw it.
+        if (assistantId) {
+          const partial = read(key).find((message) => message.id === assistantId);
+          if (partial && !partial.content.trim()) {
+            write(key, read(key).filter((message) => message.id !== assistantId));
+          } else if (partial) {
+            patch(key, assistantId, (message) => ({
+              ...message,
+              streaming: false,
+              error: true,
+            }));
+          }
+        }
+
+        throw cause;
       }
-
-      saveIdentity({ userId: response.user_id, sessionId: response.session_id });
-
-      // Notified last, so listeners observe a cache that is already correct.
-      onAssistantMessage?.(assistantMessage);
     },
 
-    onError: (_error, _variables, context) => {
+    onError: () => {
       onError?.();
-      if (!context) return;
-      writeThread(
-        context.sourceKey,
-        readThread(context.sourceKey).map((message) =>
-          message.id === context.optimisticId
-            ? { ...message, pending: false, error: true }
-            : message,
-        ),
-      );
     },
   });
 }

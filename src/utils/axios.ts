@@ -24,7 +24,7 @@ export class ApiError extends Error {
 }
 
 /** Pulls a human-readable message out of FastAPI's error shapes. */
-function extractErrorMessage(payload: unknown, fallback: string): string {
+export function extractErrorMessage(payload: unknown, fallback: string): string {
   if (payload && typeof payload === "object" && "detail" in payload) {
     const { detail } = payload as { detail: unknown };
     if (typeof detail === "string") return detail;
