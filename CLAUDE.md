@@ -110,6 +110,11 @@ hangs in `speaking` forever.
 add a client-side flag back — one source of truth is the point, and it means
 switching TTS off needs no redeploy. Absent or false means browser voice.
 
+The backend answers `tts_available: false` for `channel: "text"` on
+purpose, so the speak button on a typed reply uses the browser voice. That
+is a deliberate cost decision, not a bug — hosted audio is metered, and a
+reader who never presses play would still be billed for it.
+
 **TTS failures still fall back.** `getMessageAudio` returns null for every
 non-200 and the caller uses the browser voice. With a metered free tier,
 running out of credits is scheduled rather than exceptional.
@@ -147,6 +152,10 @@ the fallback cannot be deleted.
 `app/api/agent/[...path]/route.ts` forwards bytes untouched. The axios instance
 unwraps envelopes and throws on non-2xx — exactly wrong for a passthrough that
 must forward 422s intact.
+It forwards a small allowlist of headers in each
+direction. `if-none-match` out and `etag`/`cache-control` back are what let
+the browser reuse synthesised audio instead of re-downloading it on every
+replay; dropping them costs a second and a half per play.
 
 **Don't switch to `output: "export"`.** Pages are already prerendered to static
 HTML, so it gains nothing, and static export cannot run POST route handlers —
