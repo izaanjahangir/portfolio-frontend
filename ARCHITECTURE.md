@@ -221,6 +221,30 @@ Things worth knowing:
 - On failure, an assistant bubble with no real text is removed; a partial
   answer is kept, since the visitor already read it.
 
+### Channels
+
+`ChatRequest.channel` is `"text"` or `"voice"` (server default `"text"`),
+and the agent writes differently for each. Measured on the same question in
+one conversation:
+
+| Channel | Length | Style |
+| --- | --- | --- |
+| `text` | 782 chars | Markdown bullets and bold, per-project detail |
+| `voice` | 258 chars | Plain prose, ends with a spoken follow-up question |
+
+Typing sends `text`; the voice loop sends `voice`. Getting this wrong is
+worse than it sounds — a markdown answer read aloud means hearing bullet
+markers and bold syntax, and a voice answer shown on screen looks thin and
+truncated.
+
+The channel is recorded on the user's message so a retry asks for the same
+kind of answer. Retrying a spoken question as text would fetch markdown and
+then read it aloud.
+
+Markdown stripping stays in place for spoken text even though `voice`
+answers arrive clean: it costs nothing, and it is the only thing standing
+between a stray `**` and the visitor hearing "star star".
+
 ### Response metadata
 
 `ChatResponse` and each `MessageOut` may carry a `ResponseMetadata`:

@@ -6,12 +6,14 @@ import { DRAFT_THREAD } from "@/config/constants";
 import { createMessage } from "@/utils/messages";
 import { saveIdentity } from "@/utils/identity";
 import { queryKeys } from "./queryKeys";
-import type { AgentIdentity, ChatMessage, ChatResponse } from "@/types";
+import type { AgentIdentity, ChatChannel, ChatMessage, ChatResponse } from "@/types";
 
 /** React Query bindings for /api/chat. */
 
 interface SendMessageVariables {
   text: string;
+  /** Which kind of answer to ask for. Defaults to "text". */
+  channel?: ChatChannel;
 }
 
 export interface UseSendMessageOptions {
@@ -65,12 +67,12 @@ export function useSendMessage(
   };
 
   return useMutation<ChatResponse, Error, SendMessageVariables>({
-    mutationFn: async ({ text }) => {
+    mutationFn: async ({ text, channel = "text" }) => {
       // The thread may still be the draft; `start` tells us where it really
       // lives, and this is reassigned at that point.
       let key = queryKeys.conversation(identity.sessionId ?? DRAFT_THREAD);
 
-      const userMessage = createMessage("user", text, { pending: true });
+      const userMessage = createMessage("user", text, { pending: true, channel });
       write(key, [...read(key), userMessage]);
 
       let assistantId: string | null = null;
@@ -81,6 +83,7 @@ export function useSendMessage(
             message: text,
             user_id: identity.userId,
             session_id: identity.sessionId,
+            channel,
           },
           {
             onStart: (event) => {

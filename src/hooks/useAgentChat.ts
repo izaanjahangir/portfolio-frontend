@@ -10,7 +10,7 @@ import { ApiError } from "@/utils/axios";
 import { clearSession } from "@/utils/identity";
 import { createMessage } from "@/utils/messages";
 import { useIdentity } from "./useIdentity";
-import type { AgentIdentity, ChatMessage } from "@/types";
+import type { AgentIdentity, ChatChannel, ChatMessage } from "@/types";
 
 /**
  * Composes the chat resource hooks into everything a chat UI needs.
@@ -45,7 +45,8 @@ export interface UseAgentChat {
   isRestoring: boolean;
   error: string | null;
   identity: AgentIdentity;
-  sendMessage: (text: string) => void;
+  /** `channel` tells the agent whether to write for reading or for hearing. */
+  sendMessage: (text: string, channel?: ChatChannel) => void;
   /** Re-sends the last user message after a failure. */
   retryLast: () => void;
   /** Drops the current thread and starts a fresh one. */
@@ -93,10 +94,10 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChat {
   );
 
   const sendMessage = useCallback(
-    (text: string) => {
+    (text: string, channel: ChatChannel = "text") => {
       const trimmed = text.trim();
       if (!trimmed || sendMutation.isPending) return;
-      sendMutation.mutate({ text: trimmed });
+      sendMutation.mutate({ text: trimmed, channel });
     },
     [sendMutation],
   );
@@ -113,7 +114,11 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChat {
     // Drop the failed attempt *and* any partial reply after it; the send
     // re-adds the question optimistically.
     queryClient.setQueryData<ChatMessage[]>(threadKey, thread.slice(0, lastUserIndex));
-    sendMutation.mutate({ text: lastUserMessage.content });
+    // Retry on the same channel the failed message used.
+    sendMutation.mutate({
+      text: lastUserMessage.content,
+      channel: lastUserMessage.channel ?? "text",
+    });
   }, [sendMutation, queryClient, threadKey]);
 
   const startNewConversation = useCallback(() => {

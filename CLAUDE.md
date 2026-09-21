@@ -91,6 +91,11 @@ name, so a page sets only its own title.
 **Feature-detect browser APIs through `useClientFlag`.** Detection differs
 between server and client; branching on it directly is a hydration error.
 
+**Send the right `channel`.** `"voice"` from the voice loop, `"text"` when
+typing. The agent writes markdown for `text` and short spoken prose for
+`voice`, so the wrong one means hearing bullet markers read aloud or seeing
+a thin answer on screen. A retry must reuse the original message's channel.
+
 **Speech starts before the answer is complete.** `speakStream` queues
 sentences as deltas arrive. Anything that can end a reply — success, error,
 or the visitor stopping — must close or cancel that session, or the loop
@@ -150,8 +155,9 @@ Done: the agent (streaming chat over SSE, markdown, session restore, retry),
 the layered structure, the SEO foundation (metadata, JSON-LD, sitemap,
 robots, OG image), and hands-free browser-native voice conversation (Web
 Speech API, no backend, no cost) — the visitor talks, the agent answers
-aloud, and it listens again. The agent's `end_of_conversation` and
-`language` metadata drive when voice mode closes and which voice speaks.
+aloud, and it listens again. Requests carry a `channel` so the agent writes
+for reading or for hearing, and its `end_of_conversation` and `language`
+metadata drive when voice mode closes and which voice speaks.
 
 Next: the real portfolio design and content. The UI so far is deliberately
 plain — the chat is themed entirely through `--agent-*` custom properties in

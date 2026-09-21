@@ -7,7 +7,7 @@ import { useTextToSpeech } from "./useTextToSpeech";
 import { isFarewell, looksLikeQuestion } from "@/utils/intent";
 import { markdownToPlainText, takeSpeakableChunk } from "@/utils/text";
 import { speakStream, stopSpeaking, type SpeechStream } from "@/utils/speechSynthesis";
-import type { ChatMessage } from "@/types";
+import type { ChatChannel, ChatMessage } from "@/types";
 
 /**
  * Hands-free voice conversation.
@@ -55,7 +55,7 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
   // phase from a ref rather than a captured value.
   const phaseRef = useRef<VoicePhase>("idle");
   const silentTurnsRef = useRef(0);
-  const sendRef = useRef<(text: string) => void>(() => {});
+  const sendRef = useRef<(text: string, channel?: ChatChannel) => void>(() => {});
   const speakingIdRef = useRef<string | null>(null);
   /**
    * The client's own guess that the visitor said goodbye, used only when
@@ -89,7 +89,9 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
       endAfterReplyRef.current = isFarewell(transcript);
       bufferRef.current = "";
       toPhase("thinking");
-      sendRef.current(transcript);
+      // Spoken questions ask for spoken answers: short prose the agent
+      // wrote to be heard, rather than markdown that has to be stripped.
+      sendRef.current(transcript, "voice");
     },
     [toPhase],
   );

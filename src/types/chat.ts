@@ -6,6 +6,16 @@
 export type MessageRole = "user" | "assistant";
 
 /**
+ * How the visitor is talking to the agent.
+ *
+ * The agent writes differently for each: `voice` answers are short, plain
+ * prose meant to be heard, `text` answers use markdown and go into more
+ * detail. Sending the wrong one means reading bullet lists and bold
+ * markers aloud, or showing a thin spoken answer on screen.
+ */
+export type ChatChannel = "text" | "voice";
+
+/**
  * Machine-readable facts the agent reports about one answer.
  *
  * Nullable on the wire, and observed to be null intermittently, so every
@@ -33,6 +43,8 @@ export interface ChatRequest {
   message: string;
   user_id?: string | null;
   session_id?: string | null;
+  /** Defaults to "text" server-side when omitted. */
+  channel?: ChatChannel;
 }
 
 export interface ChatResponse {
@@ -82,6 +94,12 @@ export interface ChatMessage {
   error?: boolean;
   /** Still receiving deltas. */
   streaming?: boolean;
+  /**
+   * Channel a user message was sent on, so a retry asks for the same kind
+   * of answer. Retrying a spoken question as text would fetch markdown and
+   * then read it aloud.
+   */
+  channel?: ChatChannel;
   metadata?: ResponseMetadata | null;
 }
 
