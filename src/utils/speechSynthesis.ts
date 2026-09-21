@@ -61,22 +61,123 @@ interface Session {
 let generation = 0;
 let session: Session | null = null;
 
-/** Playback of pre-rendered audio, used instead of the browser's voice. */
+/**
+ * Playback of pre-rendered audio, used instead of the browser's voice.
+ *
+ * Also a queue, for the same reason the synthesis side is one: the backend
+ * sends a reply as a series of clips, one per sentence, while the text is
+ * still streaming. Clips play in arrival order — the backend guarantees
+ * that is speaking order — each starting from the previous one's `ended`.
+ */
+interface AudioSession {
+  id: string;
+  /** Guards against a cancelled session resuming after `stop()`. */
+  run: number;
+  onEnd?: () => void;
+  queue: Blob[];
+  /** No more clips will be pushed. */
+  closed: boolean;
+  /** A clip is playing. */
+  busy: boolean;
+  /** Object URL of the clip currently playing, held so it can be revoked. */
+  url: string | null;
+}
+
+let audioSession: AudioSession | null = null;
+
+/**
+ * One element for every clip, rather than one per clip.
+ *
+ * Safari grants playback permission to the element the visitor's gesture
+ * touched, not to the document, so a fresh `new Audio()` per sentence
+ * would be blocked from the second clip on.
+ */
 let audioElement: HTMLAudioElement | null = null;
-let audioObjectUrl: string | null = null;
+let audioUnlocked = false;
+
+/** 10ms of silence — long enough to count as playback, short enough to not be heard. */
+const SILENT_CLIP =
+  "data:audio/wav;base64,UklGRnQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YVAAAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgA==";
+
+function getAudioElement(): HTMLAudioElement {
+  audioElement ??= new Audio();
+  return audioElement;
+}
+
+/**
+ * Buys permission to play audio later, from inside a user gesture.
+ *
+ * Browsers only allow playback a visitor asked for, and by the time the
+ * first clip arrives the click that started voice mode is long past. So
+ * the element plays silence now, while the gesture is still live, and
+ * every clip after that rides on the permission this earns.
+ */
+export function unlockAudioPlayback(): void {
+  if (typeof window === "undefined" || audioUnlocked) return;
+  audioUnlocked = true;
+
+  const element = getAudioElement();
+  element.src = SILENT_CLIP;
+  void element.play().catch(() => {});
+}
 
 function releaseAudio(): void {
   if (audioElement) {
     audioElement.pause();
     audioElement.onended = null;
     audioElement.onerror = null;
-    audioElement.src = "";
-    audioElement = null;
+    // Assigning "" would resolve against the page URL and try to load it.
+    audioElement.removeAttribute("src");
+    audioElement.load();
   }
-  if (audioObjectUrl) {
-    URL.revokeObjectURL(audioObjectUrl);
-    audioObjectUrl = null;
+  if (audioSession?.url) {
+    URL.revokeObjectURL(audioSession.url);
+    audioSession.url = null;
   }
+}
+
+function finishAudio(active: AudioSession): void {
+  if (active.run !== generation) return;
+  releaseAudio();
+  audioSession = null;
+  setState(IDLE);
+  active.onEnd?.();
+}
+
+function pumpAudio(active: AudioSession): void {
+  if (active.run !== generation || active.busy) return;
+
+  const next = active.queue.shift();
+  if (next === undefined) {
+    // Out of clips: finished only if nothing more is coming. A `done` event
+    // that lands mid-queue therefore never cuts playback short.
+    if (active.closed) finishAudio(active);
+    return;
+  }
+
+  active.busy = true;
+
+  const element = getAudioElement();
+  const url = URL.createObjectURL(next);
+  active.url = url;
+
+  const advance = () => {
+    if (active.run !== generation) return;
+    element.onended = null;
+    element.onerror = null;
+    URL.revokeObjectURL(url);
+    if (active.url === url) active.url = null;
+    active.busy = false;
+    pumpAudio(active);
+  };
+
+  element.onended = advance;
+  // A clip that won't decode or play is skipped rather than ending the
+  // reply: the sentences after it are still worth hearing.
+  element.onerror = advance;
+
+  element.src = url;
+  void element.play().catch(advance);
 }
 
 function setState(next: SpeechState): void {
@@ -201,48 +302,13 @@ export function stopSpeaking(): void {
   generation += 1;
   if (session) clearWatchdog(session);
   session = null;
+  // Drops any clips still queued, so a late arrival cannot start playing
+  // after the visitor has moved on.
   releaseAudio();
+  audioSession = null;
 
   if (isSpeechSynthesisSupported()) window.speechSynthesis.cancel();
   if (snapshot.speakingId !== null) setState(IDLE);
-}
-
-/**
- * Plays pre-rendered audio for a message, in place of the browser's voice.
- *
- * Shares the same "who is speaking" state as synthesis, so the UI and the
- * voice loop cannot tell the two apart — which is the point: the provider
- * can change without anything downstream knowing.
- */
-export function playAudioBlob(id: string, blob: Blob, options: SpeakOptions = {}): void {
-  if (typeof window === "undefined") {
-    options.onEnd?.();
-    return;
-  }
-
-  stopSpeaking();
-  const run = ++generation;
-
-  const url = URL.createObjectURL(blob);
-  const element = new Audio(url);
-
-  audioElement = element;
-  audioObjectUrl = url;
-  setState({ speakingId: id });
-
-  const done = () => {
-    if (run !== generation) return;
-    releaseAudio();
-    setState(IDLE);
-    options.onEnd?.();
-  };
-
-  element.onended = done;
-  // Playback failure is reported as completion for the same reason a failed
-  // utterance is: a voice loop waiting on `onEnd` must not stall.
-  element.onerror = done;
-
-  void element.play().catch(done);
 }
 
 export interface SpeakOptions {
@@ -254,6 +320,70 @@ export interface SpeakOptions {
    * distinction to decide whether to start listening again.
    */
   onEnd?: () => void;
+}
+
+/** A session that clips can be appended to while it is already playing. */
+export interface AudioStream {
+  /** Queues a clip. Safe to call after `close`, where it is ignored. */
+  push: (clip: Blob) => void;
+  /** Signals that no more clips are coming; `onEnd` fires once drained. */
+  close: () => void;
+}
+
+const NO_OP_AUDIO_STREAM: AudioStream = {
+  push: () => {},
+  close: () => {},
+};
+
+/**
+ * Plays pre-rendered audio for a message, in place of the browser's voice,
+ * with the clips supplied over time.
+ *
+ * Shares the same "who is speaking" state as synthesis, so the UI and the
+ * voice loop cannot tell the two apart — which is the point: the provider
+ * can change without anything downstream knowing.
+ */
+export function playAudioStream(id: string, options: SpeakOptions = {}): AudioStream {
+  if (typeof window === "undefined") {
+    options.onEnd?.();
+    return NO_OP_AUDIO_STREAM;
+  }
+
+  stopSpeaking();
+  const run = ++generation;
+
+  const active: AudioSession = {
+    id,
+    run,
+    onEnd: options.onEnd,
+    queue: [],
+    closed: false,
+    busy: false,
+    url: null,
+  };
+
+  audioSession = active;
+  setState({ speakingId: id });
+
+  return {
+    push: (clip: Blob) => {
+      if (active.run !== generation || active.closed) return;
+      active.queue.push(clip);
+      pumpAudio(active);
+    },
+    close: () => {
+      if (active.run !== generation) return;
+      active.closed = true;
+      pumpAudio(active);
+    },
+  };
+}
+
+/** Plays a single pre-rendered clip: a stream that is closed immediately. */
+export function playAudioBlob(id: string, blob: Blob, options: SpeakOptions = {}): void {
+  const stream = playAudioStream(id, options);
+  stream.push(blob);
+  stream.close();
 }
 
 /** A session that text can be appended to while it is already playing. */

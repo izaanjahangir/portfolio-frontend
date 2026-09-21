@@ -29,6 +29,8 @@ export interface UseAgentChatOptions {
   onAssistantStart?: (messageId: string, ttsAvailable: boolean) => void;
   /** Fired per streamed chunk, with new text only. */
   onAssistantDelta?: (messageId: string, chunk: string) => void;
+  /** Fired per synthesised sentence of a voice reply, in speaking order. */
+  onAssistantAudio?: (messageId: string, clip: Blob) => void;
   /** Fired before any text with the answer's language, if reported. */
   onAssistantLanguage?: (messageId: string, language: string) => void;
   /** Fired with the assistant's reply the moment it lands. */
@@ -62,6 +64,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChat {
     restoreSession = true,
     onAssistantStart,
     onAssistantDelta,
+    onAssistantAudio,
     onAssistantLanguage,
     onAssistantMessage,
     onSendError,
@@ -74,6 +77,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChat {
   const sendMutation = useSendMessage(identity, {
     onAssistantStart,
     onAssistantDelta,
+    onAssistantAudio,
     onAssistantLanguage,
     onAssistantMessage,
     onError: onSendError,

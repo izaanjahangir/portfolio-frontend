@@ -25,6 +25,12 @@ export interface UseSendMessageOptions {
   /** Fired per chunk, with **new** text only. */
   onAssistantDelta?: (messageId: string, chunk: string) => void;
   /**
+   * Fired per synthesised sentence, in speaking order, while the text is
+   * still arriving. Voice requests only, and best effort — an answer may
+   * carry no audio at all.
+   */
+  onAssistantAudio?: (messageId: string, clip: Blob) => void;
+  /**
    * Fired before any text, with the language the answer will be in.
    * May never fire — the backend does not guarantee it.
    */
@@ -50,6 +56,7 @@ export function useSendMessage(
   {
     onAssistantStart,
     onAssistantDelta,
+    onAssistantAudio,
     onAssistantLanguage,
     onAssistantMessage,
     onError,
@@ -136,6 +143,13 @@ export function useSendMessage(
                 content: message.content + chunk,
               }));
               onAssistantDelta?.(assistantId, chunk);
+            },
+
+            // Audio is not cached with the message: the clips are a live
+            // performance of this reply, and replaying it later goes
+            // through GET /messages/{id}/audio instead.
+            onAudio: (clip) => {
+              if (assistantId) onAssistantAudio?.(assistantId, clip);
             },
           },
         );

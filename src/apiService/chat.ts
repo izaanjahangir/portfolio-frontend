@@ -4,6 +4,7 @@ import { readSseFrames } from "@/utils/sse";
 import type {
   ChatRequest,
   ChatResponse,
+  ChatStreamAudio,
   ChatStreamDone,
   ChatStreamLanguage,
   ChatStreamStart,
@@ -34,11 +35,28 @@ export interface ChatStreamHandlers {
   onLanguage?: (language: string) => void;
   /** Optional progress label while the agent uses a tool. */
   onStatus?: (label: string) => void;
+  /**
+   * Fired per synthesised sentence, in speaking order, while the text is
+   * still streaming. Play the clips back to back in arrival order.
+   */
+  onAudio?: (clip: Blob) => void;
 }
 
 function parseJson<T>(data: string): T | null {
   try {
     return JSON.parse(data) as T;
+  } catch {
+    return null;
+  }
+}
+
+/** base64 → Blob. Null for a clip that arrives malformed, which is skippable. */
+function decodeAudioClip({ b64, mime }: ChatStreamAudio): Blob | null {
+  try {
+    const binary = atob(b64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    return new Blob([bytes], { type: mime || "audio/mpeg" });
   } catch {
     return null;
   }
@@ -110,6 +128,17 @@ export async function postChatStream(
       case "language": {
         const payload = parseJson<ChatStreamLanguage>(frame.data);
         if (payload?.language) handlers.onLanguage?.(payload.language);
+        break;
+      }
+
+      case "audio": {
+        // Handed on in arrival order and never sorted: the backend
+        // guarantees speaking order, and holding clips back to reorder
+        // them would reintroduce the silence this event exists to remove.
+        const clip = parseJson<ChatStreamAudio>(frame.data);
+        if (!clip?.b64) break;
+        const blob = decodeAudioClip(clip);
+        if (blob) handlers.onAudio?.(blob);
         break;
       }
 

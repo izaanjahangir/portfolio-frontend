@@ -6,8 +6,15 @@ import { useSpeechRecognition } from "./useSpeechRecognition";
 import { useTextToSpeech } from "./useTextToSpeech";
 import { isFarewell, looksLikeQuestion } from "@/utils/intent";
 import { markdownToPlainText, takeSpeakableChunk } from "@/utils/text";
-import { speakStream, stopSpeaking, type SpeechStream } from "@/utils/speechSynthesis";
-import { speakMessage } from "@/utils/speak";
+import {
+  playAudioStream,
+  speak,
+  speakStream,
+  stopSpeaking,
+  unlockAudioPlayback,
+  type AudioStream,
+  type SpeechStream,
+} from "@/utils/speechSynthesis";
 import type { ChatChannel, ChatMessage } from "@/types";
 
 /**
@@ -67,6 +74,8 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
   const endAfterReplyRef = useRef(false);
   /** Live speech session for the reply currently arriving. */
   const streamRef = useRef<SpeechStream | null>(null);
+  /** Live playback session for a reply the backend is synthesising. */
+  const audioStreamRef = useRef<AudioStream | null>(null);
   /** Streamed markdown not yet released to the speaker. */
   const bufferRef = useRef("");
   /** Whether the backend will have audio for the reply currently arriving. */
@@ -128,6 +137,16 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
 
   // --- speaking --------------------------------------------------------
 
+  /** Hands the turn back to the visitor, or closes voice mode. */
+  const afterReply = useCallback(() => {
+    if (endAfterReplyRef.current) {
+      stopRef.current();
+      return;
+    }
+    toPhase("listening");
+    restartListeningRef.current();
+  }, [toPhase]);
+
   /**
    * Starts speaking before the answer exists.
    *
@@ -141,15 +160,16 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
       if (phaseRef.current !== "thinking") return;
 
       ttsAvailableRef.current = ttsAvailable;
+      speakingIdRef.current = messageId;
+      bufferRef.current = "";
 
-      // Hosted audio only exists once the answer is complete, so there is
-      // nothing to stream sentences into. Staying in "thinking" until the
-      // file arrives is also the honest status to show.
+      // Hosted audio arrives as its own events, sentence by sentence, and
+      // the first one may be a moment behind the first words of text.
+      // Staying in "thinking" until a clip lands is the honest status, and
+      // it leaves the browser voice free to take over if none ever does.
       if (ttsAvailable) return;
 
       toPhase("speaking");
-      speakingIdRef.current = messageId;
-      bufferRef.current = "";
 
       streamRef.current = speakStream(messageId, {
         // Opens with the default voice; the stream's `language` event
@@ -160,16 +180,52 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
           speakingIdRef.current = null;
           // Only continue if the visitor has not left voice mode meanwhile.
           if (phaseRef.current !== "speaking") return;
-          if (endAfterReplyRef.current) {
-            stopRef.current();
-            return;
-          }
-          toPhase("listening");
-          restartListeningRef.current();
+          afterReply();
         },
       });
     },
-    [toPhase],
+    [afterReply, toPhase],
+  );
+
+  /**
+   * Plays the reply's synthesised sentences as they arrive.
+   *
+   * The queue lives in `playAudioStream`: a clip that lands while the
+   * previous one is still playing is appended, never interrupting it, and
+   * plays from that one's `ended`. Arrival order is speaking order, so
+   * nothing is ever reordered.
+   */
+  const handleAssistantAudio = useCallback(
+    (messageId: string, clip: Blob) => {
+      if (speakingIdRef.current !== messageId) return;
+      if (phaseRef.current !== "thinking" && phaseRef.current !== "speaking") return;
+      // `start` said there would be no hosted audio and the browser voice
+      // took the reply. Cutting it off mid-sentence to switch voices is
+      // worse than ignoring the clips.
+      if (streamRef.current) return;
+
+      let audio = audioStreamRef.current;
+
+      if (!audio) {
+        // The first clip. Closing the mic before a sound plays is the whole
+        // rule of this loop — otherwise the agent hears itself and replies.
+        recognition.stop();
+        toPhase("speaking");
+
+        audio = playAudioStream(messageId, {
+          onEnd: () => {
+            audioStreamRef.current = null;
+            speakingIdRef.current = null;
+            if (phaseRef.current !== "speaking") return;
+            afterReply();
+          },
+        });
+        audioStreamRef.current = audio;
+      }
+
+      audio.push(clip);
+    },
+    [afterReply, recognition, toPhase],
   );
 
   /**
@@ -218,6 +274,14 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
       endAfterReplyRef.current =
         serverVerdict ?? (endAfterReplyRef.current && !looksLikeQuestion(spoken));
 
+      // Hosted audio: the clips already queued keep playing, and `close`
+      // only marks the end of the queue — `done` arriving first never cuts
+      // playback short. Its `onEnd` decides what happens next.
+      if (audioStreamRef.current && speakingIdRef.current === message.id) {
+        audioStreamRef.current.close();
+        return;
+      }
+
       // The common path: a session is already speaking this reply, so just
       // flush the tail and let its `onEnd` decide what happens next.
       if (stream && speakingIdRef.current === message.id) {
@@ -229,18 +293,15 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
         return;
       }
 
-      // No live session — the reply arrived without a `start` event, or
-      // voice mode was entered mid-flight. Fall back to speaking it whole.
+      // No live session. Either the reply arrived without a `start` event,
+      // voice mode was entered mid-flight, or audio was promised and never
+      // came — synthesis is best effort and a budget can run out partway
+      // through an answer. Speak the whole thing with the browser's voice.
+      //
+      // Deliberately not GET /messages/{id}/audio: the clips for a live
+      // reply come down the stream now, and fetching would either duplicate
+      // them or pay to synthesise what the backend already declined to.
       if (phaseRef.current !== "thinking") return;
-
-      const afterReply = () => {
-        if (endAfterReplyRef.current) {
-          stopRef.current();
-          return;
-        }
-        toPhase("listening");
-        recognition.start();
-      };
 
       if (!spoken) {
         afterReply();
@@ -251,10 +312,7 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
       toPhase("speaking");
       speakingIdRef.current = message.id;
 
-      speakMessage(message.id, spoken, {
-        // `done` is the more current answer; the `start` value covers a
-        // backend that only reports it on the stream.
-        ttsAvailable: message.metadata?.tts_available ?? ttsAvailableRef.current,
+      speak(message.id, spoken, {
         lang: message.metadata?.language,
         onEnd: () => {
           speakingIdRef.current = null;
@@ -263,7 +321,7 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
         },
       });
     },
-    [recognition, toPhase],
+    [afterReply, recognition, toPhase],
   );
 
   const handleSendError = useCallback(() => {
@@ -281,6 +339,7 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
     ...options,
     onAssistantStart: handleAssistantStart,
     onAssistantDelta: handleAssistantDelta,
+    onAssistantAudio: handleAssistantAudio,
     onAssistantLanguage: handleAssistantLanguage,
     onAssistantMessage: handleAssistantMessage,
     onSendError: handleSendError,
@@ -298,6 +357,9 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
     silentTurnsRef.current = 0;
     endAfterReplyRef.current = false;
     bufferRef.current = "";
+    // Buys the right to play the reply's audio, while the click that got
+    // us here still counts as the visitor asking for sound.
+    unlockAudioPlayback();
     toPhase("listening");
     recognition.start();
   }, [recognition, toPhase]);
@@ -307,6 +369,7 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
     speakingIdRef.current = null;
     endAfterReplyRef.current = false;
     streamRef.current = null;
+    audioStreamRef.current = null;
     bufferRef.current = "";
     ttsAvailableRef.current = false;
     toPhase("idle");

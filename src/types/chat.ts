@@ -85,6 +85,21 @@ export interface ChatStreamLanguage {
   language: string;
 }
 
+/**
+ * Payload of an SSE `audio` event: one synthesised sentence, base64-encoded.
+ *
+ * Sent only for `channel: "voice"`, interleaved with the deltas, and always
+ * in speaking order — `index` counts 0,1,2,… so it is a sanity check, not
+ * something to sort by. Best effort: a sentence whose synthesis failed is
+ * skipped silently, so an answer may carry no audio at all even after
+ * `start` reported `tts_available`.
+ */
+export interface ChatStreamAudio {
+  index: number;
+  b64: string;
+  mime: string;
+}
+
 /** Payload of the SSE `done` event. */
 export interface ChatStreamDone {
   message_id: string;

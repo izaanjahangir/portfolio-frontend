@@ -119,6 +119,20 @@ reader who never presses play would still be billed for it.
 non-200 and the caller uses the browser voice. With a metered free tier,
 running out of credits is scheduled rather than exceptional.
 
+**A live reply's audio comes down the stream, never from a fetch.** The
+`audio` events on `/api/chat/stream` carry the reply sentence by sentence,
+in speaking order; `playAudioStream` queues them and plays each from the
+previous one's `ended`. `GET /messages/{id}/audio` is now only for replaying
+an older message — calling it mid-stream duplicates what already arrived.
+Audio is best effort, so a reply can carry no clips at all even after
+`tts_available` was true, and the browser voice takes over.
+
+**Playback must be unlocked inside the click that starts voice mode.**
+Browsers only allow audio a visitor asked for, and the first clip arrives
+long after the gesture, so `unlockAudioPlayback` plays silence while the
+click is still live. Every clip then reuses that same element — Safari
+grants permission to the element, not the document.
+
 **Pick the voice explicitly.** The browser's default is routinely one of
 the worst voices installed (macOS defaults to "Daniel"). `utils/voices.ts`
 scores what is installed; don't remove it in favour of the default.
