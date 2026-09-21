@@ -96,6 +96,10 @@ typing. The agent writes markdown for `text` and short spoken prose for
 `voice`, so the wrong one means hearing bullet markers read aloud or seeing
 a thin answer on screen. A retry must reuse the original message's channel.
 
+**Ignore unknown SSE events.** The `switch` in `postChatStream` has no
+`default` deliberately; the protocol grows and an unrecognised frame is not
+an error.
+
 **Speech starts before the answer is complete.** `speakStream` queues
 sentences as deltas arrive. Anything that can end a reply — success, error,
 or the visitor stopping — must close or cancel that session, or the loop

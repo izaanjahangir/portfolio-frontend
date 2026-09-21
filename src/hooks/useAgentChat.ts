@@ -29,6 +29,8 @@ export interface UseAgentChatOptions {
   onAssistantStart?: (messageId: string) => void;
   /** Fired per streamed chunk, with new text only. */
   onAssistantDelta?: (messageId: string, chunk: string) => void;
+  /** Fired before any text with the answer's language, if reported. */
+  onAssistantLanguage?: (messageId: string, language: string) => void;
   /** Fired with the assistant's reply the moment it lands. */
   onAssistantMessage?: (message: ChatMessage) => void;
   /** Fired when a send fails. */
@@ -60,6 +62,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChat {
     restoreSession = true,
     onAssistantStart,
     onAssistantDelta,
+    onAssistantLanguage,
     onAssistantMessage,
     onSendError,
   } = options;
@@ -71,6 +74,7 @@ export function useAgentChat(options: UseAgentChatOptions = {}): UseAgentChat {
   const sendMutation = useSendMessage(identity, {
     onAssistantStart,
     onAssistantDelta,
+    onAssistantLanguage,
     onAssistantMessage,
     onError: onSendError,
   });

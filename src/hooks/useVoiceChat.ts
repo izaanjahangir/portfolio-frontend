@@ -142,8 +142,9 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
       bufferRef.current = "";
 
       streamRef.current = speakStream(messageId, {
-        // The language is only known when `done` arrives, so the opening
-        // sentences use the default and `setLanguage` corrects the rest.
+        // Opens with the default voice; the stream's `language` event
+        // corrects it before any text is queued. `done` is authoritative
+        // if that event never arrives.
         onEnd: () => {
           streamRef.current = null;
           speakingIdRef.current = null;
@@ -160,6 +161,19 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
     },
     [toPhase],
   );
+
+  /**
+   * Sets the voice before a word is spoken.
+   *
+   * The event lands between `start` and the first `delta`, so the speech
+   * session exists but has nothing queued yet — every utterance therefore
+   * gets the right language. Without it the opening sentences of a
+   * non-English answer were read in an English voice.
+   */
+  const handleAssistantLanguage = useCallback((messageId: string, language: string) => {
+    if (speakingIdRef.current !== messageId) return;
+    streamRef.current?.setLanguage(language);
+  }, []);
 
   /** Releases complete sentences to the speaker as they arrive. */
   const handleAssistantDelta = useCallback((messageId: string, chunk: string) => {
@@ -254,6 +268,7 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
     ...options,
     onAssistantStart: handleAssistantStart,
     onAssistantDelta: handleAssistantDelta,
+    onAssistantLanguage: handleAssistantLanguage,
     onAssistantMessage: handleAssistantMessage,
     onSendError: handleSendError,
   });

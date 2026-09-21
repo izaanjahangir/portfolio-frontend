@@ -5,6 +5,7 @@ import type {
   ChatRequest,
   ChatResponse,
   ChatStreamDone,
+  ChatStreamLanguage,
   ChatStreamStart,
 } from "@/types";
 import type { RequestOptions } from "./types";
@@ -26,6 +27,11 @@ export interface ChatStreamHandlers {
   onStart?: (event: ChatStreamStart) => void;
   /** Fired per chunk with **new** text only; the caller concatenates. */
   onDelta?: (text: string) => void;
+  /**
+   * Fired at most once, before the first delta, with the language the
+   * answer will be written in. Not guaranteed to arrive.
+   */
+  onLanguage?: (language: string) => void;
   /** Optional progress label while the agent uses a tool. */
   onStatus?: (label: string) => void;
 }
@@ -101,6 +107,12 @@ export async function postChatStream(
         break;
       }
 
+      case "language": {
+        const payload = parseJson<ChatStreamLanguage>(frame.data);
+        if (payload?.language) handlers.onLanguage?.(payload.language);
+        break;
+      }
+
       case "status": {
         const status = parseJson<{ label?: string }>(frame.data);
         if (status?.label) handlers.onStatus?.(status.label);
@@ -118,6 +130,8 @@ export async function postChatStream(
         );
       }
 
+      // Unknown event names fall through deliberately: the protocol is
+      // expected to grow, and an unrecognised frame is not an error.
       case "done": {
         const done = parseJson<ChatStreamDone>(frame.data);
         if (!start) {

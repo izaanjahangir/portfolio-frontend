@@ -62,6 +62,14 @@ export interface ChatStreamStart {
   message_id: string;
 }
 
+/**
+ * Payload of the SSE `language` event, sent once between `start` and the
+ * first `delta`. Not guaranteed — a model may skip reporting it.
+ */
+export interface ChatStreamLanguage {
+  language: string;
+}
+
 /** Payload of the SSE `done` event. */
 export interface ChatStreamDone {
   message_id: string;

@@ -21,6 +21,11 @@ export interface UseSendMessageOptions {
   onAssistantStart?: (messageId: string) => void;
   /** Fired per chunk, with **new** text only. */
   onAssistantDelta?: (messageId: string, chunk: string) => void;
+  /**
+   * Fired before any text, with the language the answer will be in.
+   * May never fire — the backend does not guarantee it.
+   */
+  onAssistantLanguage?: (messageId: string, language: string) => void;
   /** Fired with the assistant's reply once the stream completes. */
   onAssistantMessage?: (message: ChatMessage) => void;
   /** Fired when the send fails. */
@@ -42,6 +47,7 @@ export function useSendMessage(
   {
     onAssistantStart,
     onAssistantDelta,
+    onAssistantLanguage,
     onAssistantMessage,
     onError,
   }: UseSendMessageOptions = {},
@@ -114,6 +120,10 @@ export function useSendMessage(
 
               saveIdentity({ userId: event.user_id, sessionId: event.session_id });
               onAssistantStart?.(event.message_id);
+            },
+
+            onLanguage: (language) => {
+              if (assistantId) onAssistantLanguage?.(assistantId, language);
             },
 
             onDelta: (chunk) => {

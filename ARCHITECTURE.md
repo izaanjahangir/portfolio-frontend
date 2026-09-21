@@ -196,6 +196,7 @@ carries `finish_reason` plus the metadata object.
 | --- | --- |
 | SSE frame parser | `utils/sse.ts` |
 | Stream client | `apiService/chat.ts` → `postChatStream` |
+| Events handled | `start`, `language`, `delta`, `status`, `done`, `error` |
 | Cache writes per delta | `reactQuery/useChat.ts` |
 
 Things worth knowing:
@@ -216,6 +217,9 @@ Things worth knowing:
   `stream: true`.
 - **Deltas can arrive with leading whitespace**, so the assembled answer is
   trimmed.
+- **Unknown event names are ignored, not treated as errors.** The `switch`
+  in `postChatStream` has no `default` on purpose — the protocol is expected
+  to grow, and an unrecognised frame must not break a stream.
 - **A stream that ends without `done` is an error**, not a short answer.
   Half a reply must never be presented as complete.
 - On failure, an assistant bubble with no real text is removed; a partial
@@ -332,9 +336,16 @@ Guards in `takeSpeakableChunk`:
 - A long run with no punctuation is force-flushed at a word break rather
   than stalling speech indefinitely.
 
-`metadata.language` only arrives with `done`, so the opening sentences use
-the default voice and `setLanguage` corrects the remainder. A non-English
-answer therefore starts in an English voice — the cost of not waiting.
+The voice is set before a word is spoken. The stream emits a `language`
+event once, after `start` and before the first `delta`, so the speech
+session exists but has nothing queued yet and every utterance gets the
+right language — verified with a German answer, where even the first
+sentence is spoken `de-DE`.
+
+That event is **not guaranteed**: if it never arrives, playback opens with
+the default voice and `metadata.language` on `done` corrects whatever is
+left. Only that fallback path can start a non-English answer in an English
+voice.
 
 #### Other things that are the way they are for a reason
 
