@@ -105,9 +105,14 @@ sentences as deltas arrive. Anything that can end a reply — success, error,
 or the visitor stopping — must close or cancel that session, or the loop
 hangs in `speaking` forever.
 
-**TTS failures fall back, they don't throw.** `getMessageAudio` returns null
-for every non-200 and the caller uses the browser voice. With a metered free
-tier, running out of credits is scheduled rather than exceptional.
+**The backend owns the browser-voice-vs-hosted-audio decision**, through
+`tts_available` on the SSE `start` event and in `ResponseMetadata`. Do not
+add a client-side flag back — one source of truth is the point, and it means
+switching TTS off needs no redeploy. Absent or false means browser voice.
+
+**TTS failures still fall back.** `getMessageAudio` returns null for every
+non-200 and the caller uses the browser voice. With a metered free tier,
+running out of credits is scheduled rather than exceptional.
 
 **Pick the voice explicitly.** The browser's default is routinely one of
 the worst voices installed (macOS defaults to "Daniel"). `utils/voices.ts`
@@ -156,7 +161,6 @@ directly with CORS and a public URL.
 | --- | --- | --- |
 | `AGENT_API_URL` | server | Proxy target. Never exposed to the browser. |
 | `NEXT_PUBLIC_SITE_URL` | browser | Absolute origin, no trailing slash. |
-| `NEXT_PUBLIC_TTS_PROVIDER` | browser | `browser` or `elevenlabs`. Defaults to `browser` so nothing spends credits unasked. Build-time inlined — restart after changing, or use the localStorage override in ARCHITECTURE.md. |
 
 `NEXT_PUBLIC_SITE_URL` still defaults to `http://localhost:3000`. It feeds
 canonical URLs, Open Graph tags, the sitemap and the social card — set it to

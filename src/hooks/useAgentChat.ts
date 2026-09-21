@@ -25,8 +25,8 @@ export interface UseAgentChatOptions {
   greeting?: string;
   /** Rehydrate the stored session on mount. Default: true. */
   restoreSession?: boolean;
-  /** Fired when the reply starts arriving, before any text. */
-  onAssistantStart?: (messageId: string) => void;
+  /** Fired when the reply starts, with whether hosted audio is available. */
+  onAssistantStart?: (messageId: string, ttsAvailable: boolean) => void;
   /** Fired per streamed chunk, with new text only. */
   onAssistantDelta?: (messageId: string, chunk: string) => void;
   /** Fired before any text with the answer's language, if reported. */

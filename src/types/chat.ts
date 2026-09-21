@@ -28,6 +28,14 @@ export interface ResponseMetadata {
   language: string;
   /** The agent asked for something and needs a reply. */
   awaiting_input: boolean;
+  /**
+   * Whether the backend would synthesise audio for this message right now:
+   * TTS enabled, within budget, provider healthy.
+   *
+   * The single switch for browser voice vs. hosted audio. The frontend
+   * holds no flag of its own — absent or false means use the browser.
+   */
+  tts_available?: boolean;
 }
 
 /** A message as returned by GET /api/conversations/{session_id}. */
@@ -60,6 +68,13 @@ export interface ChatStreamStart {
   user_id: string;
   session_id: string;
   message_id: string;
+  /**
+   * Whether hosted audio will be available for this answer.
+   *
+   * Needed here rather than only on `done`: by then the browser voice has
+   * already started speaking, so the choice has to be made up front.
+   */
+  tts_available?: boolean;
 }
 
 /**

@@ -50,7 +50,7 @@ export function MessageItem({ message }: MessageItemProps) {
         <div className={styles.actions}>
           <SpeakButton
             isSpeaking={speakingId === message.id}
-            onToggle={() => toggle(message.id, spokenText)}
+            onToggle={() => toggle(message.id, spokenText, message.metadata?.tts_available)}
           />
         </div>
       ) : null}

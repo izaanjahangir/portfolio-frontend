@@ -19,7 +19,7 @@ export interface UseTextToSpeech {
   speakingId: string | null;
   isSpeaking: boolean;
   /** Speaks `text`; speaking the message that is already playing stops it. */
-  toggle: (id: string, text: string) => void;
+  toggle: (id: string, text: string, ttsAvailable?: boolean) => void;
   speak: (id: string, text: string, options?: SpeakOptions) => void;
   stop: () => void;
 }
@@ -40,9 +40,9 @@ export function useTextToSpeech(): UseTextToSpeech {
   );
 
   const toggle = useCallback(
-    (id: string, text: string) => {
+    (id: string, text: string, ttsAvailable?: boolean) => {
       if (speakingId === id) stopSpeaking();
-      else speakMessage(id, text);
+      else speakMessage(id, text, { ttsAvailable });
     },
     [speakingId],
   );

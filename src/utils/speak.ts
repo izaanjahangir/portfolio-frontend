@@ -1,52 +1,31 @@
 import { getMessageAudio } from "@/apiService/messages";
-import {
-  TTS_PROVIDER,
-  TTS_PROVIDER_OVERRIDE_KEY,
-  type TtsProvider,
-} from "@/config/constants";
 import { playAudioBlob, speak, type SpeakOptions } from "./speechSynthesis";
 
-/**
- * Chooses how a message is spoken.
- *
- * Everything downstream — the voice loop, the speak buttons, the UI state —
- * is unaware of which provider ran. Switching is a config change, not a
- * code change.
- */
-
-/**
- * The provider in effect.
- *
- * `NEXT_PUBLIC_TTS_PROVIDER` sets the default but is inlined at build time,
- * so a localStorage override exists for flipping it mid-session without
- * restarting the dev server:
- *
- *     localStorage.setItem("portfolio.agent.ttsProvider", "browser")
- *
- * That matters in practice — the paid tier is metered, and testing an
- * unrelated change shouldn't quietly spend it.
- */
-export function resolveTtsProvider(): TtsProvider {
-  if (typeof window !== "undefined") {
-    try {
-      const override = window.localStorage.getItem(TTS_PROVIDER_OVERRIDE_KEY);
-      if (override === "browser" || override === "elevenlabs") return override;
-    } catch {
-      // Storage unavailable; fall through to the build-time default.
-    }
-  }
-  return TTS_PROVIDER;
+export interface SpeakMessageOptions extends SpeakOptions {
+  /**
+   * The backend's verdict for this message. It owns the decision entirely —
+   * there is no client-side provider setting to reconcile it with, which is
+   * why flipping TTS off in the backend takes effect immediately with no
+   * redeploy.
+   */
+  ttsAvailable?: boolean;
 }
 
 /**
- * Speaks a message, using pre-rendered audio when configured and available.
+ * Speaks a message, using hosted audio when the backend says it exists.
  *
- * `text` is the plain-text fallback, used whenever the audio endpoint says
- * no — quota exhausted, message not eligible, endpoint not deployed yet.
- * Falling back to the browser's voice always beats saying nothing.
+ * `text` is the spoken fallback. It is used whenever the audio request does
+ * not produce a file — exhausted quota, an ineligible message, a provider
+ * hiccup. That is error handling rather than a second opinion: the backend
+ * still decides whether to try at all, but a failed request must never
+ * leave a voice conversation silent.
  */
-export function speakMessage(id: string, text: string, options: SpeakOptions = {}): void {
-  if (resolveTtsProvider() === "browser") {
+export function speakMessage(
+  id: string,
+  text: string,
+  { ttsAvailable = false, ...options }: SpeakMessageOptions = {},
+): void {
+  if (!ttsAvailable) {
     speak(id, text, options);
     return;
   }

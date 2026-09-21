@@ -7,7 +7,7 @@ import { useTextToSpeech } from "./useTextToSpeech";
 import { isFarewell, looksLikeQuestion } from "@/utils/intent";
 import { markdownToPlainText, takeSpeakableChunk } from "@/utils/text";
 import { speakStream, stopSpeaking, type SpeechStream } from "@/utils/speechSynthesis";
-import { resolveTtsProvider, speakMessage } from "@/utils/speak";
+import { speakMessage } from "@/utils/speak";
 import type { ChatChannel, ChatMessage } from "@/types";
 
 /**
@@ -69,6 +69,8 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
   const streamRef = useRef<SpeechStream | null>(null);
   /** Streamed markdown not yet released to the speaker. */
   const bufferRef = useRef("");
+  /** Whether the backend will have audio for the reply currently arriving. */
+  const ttsAvailableRef = useRef(false);
   // Set from effects below: these callbacks are defined before the values
   // they need exist, so they reach them through refs.
   const restartListeningRef = useRef<() => void>(() => {});
@@ -135,13 +137,15 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
    * that: the agent starts talking a beat after the first sentence lands.
    */
   const handleAssistantStart = useCallback(
-    (messageId: string) => {
+    (messageId: string, ttsAvailable: boolean) => {
       if (phaseRef.current !== "thinking") return;
 
-      // Pre-rendered audio only exists once the answer is complete, so with
-      // that provider there is nothing to stream into. Staying in
-      // "thinking" until `done` is also the honest status to show.
-      if (resolveTtsProvider() !== "browser") return;
+      ttsAvailableRef.current = ttsAvailable;
+
+      // Hosted audio only exists once the answer is complete, so there is
+      // nothing to stream sentences into. Staying in "thinking" until the
+      // file arrives is also the honest status to show.
+      if (ttsAvailable) return;
 
       toPhase("speaking");
       speakingIdRef.current = messageId;
@@ -248,6 +252,9 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
       speakingIdRef.current = message.id;
 
       speakMessage(message.id, spoken, {
+        // `done` is the more current answer; the `start` value covers a
+        // backend that only reports it on the stream.
+        ttsAvailable: message.metadata?.tts_available ?? ttsAvailableRef.current,
         lang: message.metadata?.language,
         onEnd: () => {
           speakingIdRef.current = null;
@@ -301,6 +308,7 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
     endAfterReplyRef.current = false;
     streamRef.current = null;
     bufferRef.current = "";
+    ttsAvailableRef.current = false;
     toPhase("idle");
     recognition.stop();
     speech.stop();

@@ -380,31 +380,28 @@ language and the cache is dropped on `voiceschanged`.
 This matters beyond today: it is what visitors hear whenever a paid TTS
 service is unavailable or out of quota.
 
-#### Choosing a provider
+#### Browser voice or hosted audio
 
-`NEXT_PUBLIC_TTS_PROVIDER` is `browser` or `elevenlabs`, and
-`utils/speak.ts` dispatches on it. Everything downstream — the voice loop,
-the speak buttons, the "who is speaking" state — is unaware of which ran,
-so switching is config, not code.
+The backend decides, per message, via `tts_available`. There is no
+client-side flag to reconcile it with, so switching TTS off in the backend
+takes effect for every visitor immediately, with no redeploy.
 
-It defaults to `browser` on purpose: credits are finite and nothing should
-spend them unless asked to. Verified — in `browser` mode no request to the
-audio endpoint is made at all.
+`tts_available` arrives in two places:
 
-`NEXT_PUBLIC_*` is inlined at build time, so changing the env var needs a
-dev-server restart. For flipping mid-session there is a localStorage
-override, which takes precedence:
+- On the SSE **`start`** event — this is the one that matters. By `done`
+  the browser voice has already begun speaking sentences, so the choice
+  has to be made before any text arrives.
+- In **`ResponseMetadata`** — for the non-streaming endpoint, for replaying
+  history, and as the more current value at `done`.
 
-```js
-localStorage.setItem("portfolio.agent.ttsProvider", "browser")
-localStorage.removeItem("portfolio.agent.ttsProvider")  // back to the env value
-```
+Absent or false means the browser voice. That default is deliberate: an
+older backend, or one that has said nothing, should never trigger a paid
+request.
 
-**Unavailable audio is an ordinary outcome, not an error.** `getMessageAudio`
-flattens every non-200 to null — `503` for exhausted quota, `409` for an
-ineligible message, `404` before the endpoint is deployed — and the caller
-speaks with the browser voice instead. With a metered free tier, running out
-is scheduled, not exceptional, so silence is never the right response.
+**A failed audio request still falls back.** `getMessageAudio` flattens
+every non-200 to null and the caller speaks with the browser voice. That is
+error handling, not a second opinion — the backend still decides whether to
+try, but a request that fails must never leave a voice conversation silent.
 
 #### Other things that are the way they are for a reason
 

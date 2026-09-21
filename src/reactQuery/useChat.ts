@@ -17,8 +17,11 @@ interface SendMessageVariables {
 }
 
 export interface UseSendMessageOptions {
-  /** Fired when the reply starts arriving, before any text. */
-  onAssistantStart?: (messageId: string) => void;
+  /**
+   * Fired when the reply starts arriving, before any text, with whether
+   * hosted audio will be available for it.
+   */
+  onAssistantStart?: (messageId: string, ttsAvailable: boolean) => void;
   /** Fired per chunk, with **new** text only. */
   onAssistantDelta?: (messageId: string, chunk: string) => void;
   /**
@@ -119,7 +122,7 @@ export function useSendMessage(
               ]);
 
               saveIdentity({ userId: event.user_id, sessionId: event.session_id });
-              onAssistantStart?.(event.message_id);
+              onAssistantStart?.(event.message_id, event.tts_available === true);
             },
 
             onLanguage: (language) => {
