@@ -10,6 +10,7 @@ import {
   subscribeToSpeech,
   type SpeakOptions,
 } from "@/utils/speechSynthesis";
+import { speakMessage } from "@/utils/speak";
 import { useClientFlag } from "./useClientFlag";
 
 export interface UseTextToSpeech {
@@ -41,7 +42,7 @@ export function useTextToSpeech(): UseTextToSpeech {
   const toggle = useCallback(
     (id: string, text: string) => {
       if (speakingId === id) stopSpeaking();
-      else speak(id, text);
+      else speakMessage(id, text);
     },
     [speakingId],
   );

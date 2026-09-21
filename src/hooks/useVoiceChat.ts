@@ -7,6 +7,7 @@ import { useTextToSpeech } from "./useTextToSpeech";
 import { isFarewell, looksLikeQuestion } from "@/utils/intent";
 import { markdownToPlainText, takeSpeakableChunk } from "@/utils/text";
 import { speakStream, stopSpeaking, type SpeechStream } from "@/utils/speechSynthesis";
+import { resolveTtsProvider, speakMessage } from "@/utils/speak";
 import type { ChatChannel, ChatMessage } from "@/types";
 
 /**
@@ -137,6 +138,11 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
     (messageId: string) => {
       if (phaseRef.current !== "thinking") return;
 
+      // Pre-rendered audio only exists once the answer is complete, so with
+      // that provider there is nothing to stream into. Staying in
+      // "thinking" until `done` is also the honest status to show.
+      if (resolveTtsProvider() !== "browser") return;
+
       toPhase("speaking");
       speakingIdRef.current = messageId;
       bufferRef.current = "";
@@ -241,7 +247,7 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
       toPhase("speaking");
       speakingIdRef.current = message.id;
 
-      speech.speak(message.id, spoken, {
+      speakMessage(message.id, spoken, {
         lang: message.metadata?.language,
         onEnd: () => {
           speakingIdRef.current = null;
@@ -250,7 +256,7 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
         },
       });
     },
-    [recognition, speech, toPhase],
+    [recognition, toPhase],
   );
 
   const handleSendError = useCallback(() => {

@@ -1,4 +1,5 @@
 import { splitIntoSpeechChunks } from "./text";
+import { selectVoice } from "./voices";
 
 /**
  * Browser speech synthesis (text → speech).
@@ -60,6 +61,24 @@ interface Session {
 let generation = 0;
 let session: Session | null = null;
 
+/** Playback of pre-rendered audio, used instead of the browser's voice. */
+let audioElement: HTMLAudioElement | null = null;
+let audioObjectUrl: string | null = null;
+
+function releaseAudio(): void {
+  if (audioElement) {
+    audioElement.pause();
+    audioElement.onended = null;
+    audioElement.onerror = null;
+    audioElement.src = "";
+    audioElement = null;
+  }
+  if (audioObjectUrl) {
+    URL.revokeObjectURL(audioObjectUrl);
+    audioObjectUrl = null;
+  }
+}
+
 function setState(next: SpeechState): void {
   snapshot = next;
   for (const listener of listeners) listener();
@@ -117,6 +136,16 @@ function pump(active: Session): void {
   const utterance = new SpeechSynthesisUtterance(next);
   utterance.lang = active.lang;
 
+  // Chosen explicitly: the browser's own default is routinely one of the
+  // worst voices installed. Null means nothing matched the language, in
+  // which case the browser's choice is still the best available.
+  const voice = selectVoice(active.lang);
+  if (voice) {
+    utterance.voice = voice;
+    // Keep the two in step, or some engines re-resolve to the default.
+    utterance.lang = voice.lang;
+  }
+
   const advance = () => {
     if (active.run !== generation) return;
     active.busy = false;
@@ -167,12 +196,53 @@ function whenVoicesReady(callback: (hasVoices: boolean) => void): void {
 }
 
 export function stopSpeaking(): void {
-  if (!isSpeechSynthesisSupported()) return;
+  if (typeof window === "undefined") return;
+
   generation += 1;
   if (session) clearWatchdog(session);
   session = null;
-  window.speechSynthesis.cancel();
+  releaseAudio();
+
+  if (isSpeechSynthesisSupported()) window.speechSynthesis.cancel();
   if (snapshot.speakingId !== null) setState(IDLE);
+}
+
+/**
+ * Plays pre-rendered audio for a message, in place of the browser's voice.
+ *
+ * Shares the same "who is speaking" state as synthesis, so the UI and the
+ * voice loop cannot tell the two apart — which is the point: the provider
+ * can change without anything downstream knowing.
+ */
+export function playAudioBlob(id: string, blob: Blob, options: SpeakOptions = {}): void {
+  if (typeof window === "undefined") {
+    options.onEnd?.();
+    return;
+  }
+
+  stopSpeaking();
+  const run = ++generation;
+
+  const url = URL.createObjectURL(blob);
+  const element = new Audio(url);
+
+  audioElement = element;
+  audioObjectUrl = url;
+  setState({ speakingId: id });
+
+  const done = () => {
+    if (run !== generation) return;
+    releaseAudio();
+    setState(IDLE);
+    options.onEnd?.();
+  };
+
+  element.onended = done;
+  // Playback failure is reported as completion for the same reason a failed
+  // utterance is: a voice loop waiting on `onEnd` must not stall.
+  element.onerror = done;
+
+  void element.play().catch(done);
 }
 
 export interface SpeakOptions {

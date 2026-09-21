@@ -22,3 +22,22 @@ export const STORAGE_KEYS = {
 
 /** Cache key for a conversation the backend hasn't created yet. */
 export const DRAFT_THREAD = "draft";
+
+/** Where spoken answers get their audio. */
+export type TtsProvider = "browser" | "elevenlabs";
+
+/**
+ * Default TTS provider, from NEXT_PUBLIC_TTS_PROVIDER.
+ *
+ * Defaults to "browser" deliberately: ElevenLabs credits are finite and
+ * nothing should spend them unless it was asked to.
+ *
+ * NEXT_PUBLIC_* values are inlined at build time, so changing this needs a
+ * dev-server restart. `TTS_PROVIDER_OVERRIDE_KEY` exists for flipping it
+ * without one — see `utils/speak.ts`.
+ */
+export const TTS_PROVIDER: TtsProvider =
+  process.env.NEXT_PUBLIC_TTS_PROVIDER === "elevenlabs" ? "elevenlabs" : "browser";
+
+/** localStorage key that overrides TTS_PROVIDER at runtime, for testing. */
+export const TTS_PROVIDER_OVERRIDE_KEY = "portfolio.agent.ttsProvider";

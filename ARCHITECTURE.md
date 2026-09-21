@@ -304,6 +304,7 @@ feature-detected and simply absent there.
 | The loop | `hooks/useVoiceChat.ts` |
 | Recognition types + detection | `utils/speechRecognition.ts` |
 | Synthesis store (shared global) | `utils/speechSynthesis.ts` |
+| Voice selection | `utils/voices.ts` |
 | Markdown stripping + chunking | `utils/text.ts` |
 | Farewell detection | `utils/intent.ts` |
 | Mic / status UI | `components/AgentChat/components/{MicButton,VoiceStatus}` |
@@ -346,6 +347,64 @@ That event is **not guaranteed**: if it never arrives, playback opens with
 the default voice and `metadata.language` on `done` corrects whatever is
 left. Only that fallback path can start a non-English answer in an English
 voice.
+
+#### Choosing a voice
+
+The browser's default voice is routinely one of the worst installed. On
+macOS it picks **Daniel**, from a list that also contains "Boing",
+"Bubbles" and "Zarvox". `utils/voices.ts` scores what is actually installed
+instead — on the same machine that yields Samantha for `en-US` and Anna for
+`de-DE`.
+
+Scoring, in order of weight: language match (exact locale beats language
+alone), then `natural`/`neural` in the name or URI, then
+`premium`/`enhanced`, then Chrome's own `Google *` voices, then a list of
+names known to be decent on Apple and Microsoft platforms. Novelty and
+legacy voices are excluded outright. Being the browser's default is a
+tie-breaker worth one point — it says nothing about quality.
+
+Returning `null` is meaningful: nothing matched the language, so the
+browser's own choice stands rather than forcing a wrong-language voice.
+
+`LANGUAGE_FALLBACKS` borrows a voice from a near neighbour when a language
+has none installed. Urdu is the case that matters — **no desktop platform
+ships an Urdu voice**, so without it an Urdu answer is read by an English
+one and is unintelligible. Hindi is near-identical spoken, so `ur` falls
+back to `hi` (Lekha on macOS). Caveat: that works for romanised text; a
+Hindi voice fed Urdu in Arabic script may produce nothing, since it has no
+mapping for those glyphs. A multilingual TTS service is the real fix.
+
+Voice lists load asynchronously and change, so results are cached per
+language and the cache is dropped on `voiceschanged`.
+
+This matters beyond today: it is what visitors hear whenever a paid TTS
+service is unavailable or out of quota.
+
+#### Choosing a provider
+
+`NEXT_PUBLIC_TTS_PROVIDER` is `browser` or `elevenlabs`, and
+`utils/speak.ts` dispatches on it. Everything downstream — the voice loop,
+the speak buttons, the "who is speaking" state — is unaware of which ran,
+so switching is config, not code.
+
+It defaults to `browser` on purpose: credits are finite and nothing should
+spend them unless asked to. Verified — in `browser` mode no request to the
+audio endpoint is made at all.
+
+`NEXT_PUBLIC_*` is inlined at build time, so changing the env var needs a
+dev-server restart. For flipping mid-session there is a localStorage
+override, which takes precedence:
+
+```js
+localStorage.setItem("portfolio.agent.ttsProvider", "browser")
+localStorage.removeItem("portfolio.agent.ttsProvider")  // back to the env value
+```
+
+**Unavailable audio is an ordinary outcome, not an error.** `getMessageAudio`
+flattens every non-200 to null — `503` for exhausted quota, `409` for an
+ineligible message, `404` before the endpoint is deployed — and the caller
+speaks with the browser voice instead. With a metered free tier, running out
+is scheduled, not exceptional, so silence is never the right response.
 
 #### Other things that are the way they are for a reason
 

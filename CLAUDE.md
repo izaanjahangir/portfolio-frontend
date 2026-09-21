@@ -105,6 +105,14 @@ sentences as deltas arrive. Anything that can end a reply — success, error,
 or the visitor stopping — must close or cancel that session, or the loop
 hangs in `speaking` forever.
 
+**TTS failures fall back, they don't throw.** `getMessageAudio` returns null
+for every non-200 and the caller uses the browser voice. With a metered free
+tier, running out of credits is scheduled rather than exceptional.
+
+**Pick the voice explicitly.** The browser's default is routinely one of
+the worst voices installed (macOS defaults to "Daniel"). `utils/voices.ts`
+scores what is installed; don't remove it in favour of the default.
+
 **Never open the mic while the agent is speaking.** Recognition would
 transcribe the agent's own voice and reply to itself. See the voice section in
 ARCHITECTURE.md before touching `useVoiceChat`.
@@ -148,6 +156,7 @@ directly with CORS and a public URL.
 | --- | --- | --- |
 | `AGENT_API_URL` | server | Proxy target. Never exposed to the browser. |
 | `NEXT_PUBLIC_SITE_URL` | browser | Absolute origin, no trailing slash. |
+| `NEXT_PUBLIC_TTS_PROVIDER` | browser | `browser` or `elevenlabs`. Defaults to `browser` so nothing spends credits unasked. Build-time inlined — restart after changing, or use the localStorage override in ARCHITECTURE.md. |
 
 `NEXT_PUBLIC_SITE_URL` still defaults to `http://localhost:3000`. It feeds
 canonical URLs, Open Graph tags, the sitemap and the social card — set it to
