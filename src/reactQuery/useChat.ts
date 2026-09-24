@@ -25,11 +25,11 @@ export interface UseSendMessageOptions {
   /** Fired per chunk, with **new** text only. */
   onAssistantDelta?: (messageId: string, chunk: string) => void;
   /**
-   * Fired per synthesised sentence, in speaking order, while the text is
-   * still arriving. Voice requests only, and best effort — an answer may
-   * carry no audio at all.
+   * Fired per chunk of the spoken reply, in order, while the text is still
+   * arriving. Voice requests only, and best effort — an answer may carry no
+   * audio at all. `final` marks the last chunk of the recording.
    */
-  onAssistantAudio?: (messageId: string, clip: Blob) => void;
+  onAssistantAudio?: (messageId: string, chunk: Uint8Array, final: boolean) => void;
   /**
    * Fired before any text, with the language the answer will be in.
    * May never fire — the backend does not guarantee it.
@@ -145,11 +145,11 @@ export function useSendMessage(
               onAssistantDelta?.(assistantId, chunk);
             },
 
-            // Audio is not cached with the message: the clips are a live
+            // Audio is not cached with the message: these chunks are a live
             // performance of this reply, and replaying it later goes
             // through GET /messages/{id}/audio instead.
-            onAudio: (clip) => {
-              if (assistantId) onAssistantAudio?.(assistantId, clip);
+            onAudio: (chunk, final) => {
+              if (assistantId) onAssistantAudio?.(assistantId, chunk, final);
             },
           },
         );

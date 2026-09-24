@@ -188,15 +188,15 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
   );
 
   /**
-   * Plays the reply's synthesised sentences as they arrive.
+   * Feeds the reply's recording to the speaker as it arrives.
    *
-   * The queue lives in `playAudioStream`: a clip that lands while the
-   * previous one is still playing is appended, never interrupting it, and
-   * plays from that one's `ended`. Arrival order is speaking order, so
-   * nothing is ever reordered.
+   * The chunks are consecutive ranges of one file, not separate clips, so
+   * `playAudioStream` appends rather than queues them — which is what makes
+   * the reply play as one continuous piece. `final` marks the last chunk;
+   * `done` closes the recording too, in case that chunk never arrives.
    */
   const handleAssistantAudio = useCallback(
-    (messageId: string, clip: Blob) => {
+    (messageId: string, chunk: Uint8Array, final: boolean) => {
       if (speakingIdRef.current !== messageId) return;
       if (phaseRef.current !== "thinking" && phaseRef.current !== "speaking") return;
       // `start` said there would be no hosted audio and the browser voice
@@ -207,7 +207,7 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
       let audio = audioStreamRef.current;
 
       if (!audio) {
-        // The first clip. Closing the mic before a sound plays is the whole
+        // The first chunk. Closing the mic before a sound plays is the whole
         // rule of this loop — otherwise the agent hears itself and replies.
         recognition.stop();
         toPhase("speaking");
@@ -223,7 +223,8 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
         audioStreamRef.current = audio;
       }
 
-      audio.push(clip);
+      audio.push(chunk);
+      if (final) audio.close();
     },
     [afterReply, recognition, toPhase],
   );
@@ -274,9 +275,9 @@ export function useVoiceChat(options: UseAgentChatOptions = {}): UseVoiceChat {
       endAfterReplyRef.current =
         serverVerdict ?? (endAfterReplyRef.current && !looksLikeQuestion(spoken));
 
-      // Hosted audio: the clips already queued keep playing, and `close`
-      // only marks the end of the queue — `done` arriving first never cuts
-      // playback short. Its `onEnd` decides what happens next.
+      // Hosted audio: what has been appended keeps playing, and `close`
+      // only marks the end of the recording — `done` arriving first never
+      // cuts playback short. Its `onEnd` decides what happens next.
       if (audioStreamRef.current && speakingIdRef.current === message.id) {
         audioStreamRef.current.close();
         return;

@@ -64,23 +64,38 @@ let session: Session | null = null;
 /**
  * Playback of pre-rendered audio, used instead of the browser's voice.
  *
- * Also a queue, for the same reason the synthesis side is one: the backend
- * sends a reply as a series of clips, one per sentence, while the text is
- * still streaming. Clips play in arrival order — the backend guarantees
- * that is speaking order — each starting from the previous one's `ended`.
+ * The backend speaks a reply as **one continuous recording** and sends it
+ * as consecutive byte ranges of that single MP3 while the provider is still
+ * producing it. So these are not clips to queue and play one after another
+ * — chunk 0 alone is a fragment, not a file. They are appended into one
+ * buffer, which is why the result has no seams in it.
+ *
+ * Two ways to do that, chosen per browser:
+ *
+ * - `MediaSource`, which plays the recording while it is still arriving.
+ * - Collecting the chunks and playing the finished file, for browsers
+ *   without Media Source Extensions for MP3 — Safari, notably. Since the
+ *   chunks are consecutive ranges of one file, concatenating them
+ *   reconstructs it byte for byte. The cost is waiting for the last chunk.
  */
 interface AudioSession {
   id: string;
   /** Guards against a cancelled session resuming after `stop()`. */
   run: number;
   onEnd?: () => void;
-  queue: Blob[];
-  /** No more clips will be pushed. */
+  /** No more chunks are coming — the `final` one arrived, or the stream ended. */
   closed: boolean;
-  /** A clip is playing. */
-  busy: boolean;
-  /** Object URL of the clip currently playing, held so it can be revoked. */
+  /** Object URL backing the element, held so it can be revoked. */
   url: string | null;
+  /** Streaming path. Null when this browser buffers instead. */
+  media: MediaSource | null;
+  buffer: SourceBuffer | null;
+  /** Chunks waiting to be appended: `appendBuffer` takes one at a time. */
+  pending: Uint8Array[];
+  /** Buffering path: every chunk, concatenated once the last one lands. */
+  collected: Uint8Array[] | null;
+  /** Playback has been asked for, so it is not asked for twice. */
+  started: boolean;
 }
 
 let audioSession: AudioSession | null = null;
@@ -121,7 +136,38 @@ export function unlockAudioPlayback(): void {
   void element.play().catch(() => {});
 }
 
+/** The streamed MP3 format this browser can append while it plays. */
+const STREAM_MIME = "audio/mpeg";
+
+/**
+ * Whether the recording can be played while it is still arriving.
+ *
+ * False on Safari, which ships Media Source Extensions but supports only
+ * MP4/AAC through them, and on iPhone, where `MediaSource` is absent
+ * entirely. Those browsers take the buffering path instead.
+ */
+export function canStreamAudio(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.MediaSource !== "undefined" &&
+    window.MediaSource.isTypeSupported(STREAM_MIME)
+  );
+}
+
 function releaseAudio(): void {
+  const active = audioSession;
+
+  // Before the element is reset, not after: detaching it closes the media
+  // source, and `abort` on a closed source throws instead of cancelling
+  // the append still in flight.
+  if (active?.buffer && active.media?.readyState === "open") {
+    try {
+      active.buffer.abort();
+    } catch {
+      // Already detached. Nothing to abort.
+    }
+  }
+
   if (audioElement) {
     audioElement.pause();
     audioElement.onended = null;
@@ -130,9 +176,10 @@ function releaseAudio(): void {
     audioElement.removeAttribute("src");
     audioElement.load();
   }
-  if (audioSession?.url) {
-    URL.revokeObjectURL(audioSession.url);
-    audioSession.url = null;
+
+  if (active?.url) {
+    URL.revokeObjectURL(active.url);
+    active.url = null;
   }
 }
 
@@ -144,40 +191,98 @@ function finishAudio(active: AudioSession): void {
   active.onEnd?.();
 }
 
-function pumpAudio(active: AudioSession): void {
-  if (active.run !== generation || active.busy) return;
+/** Plays whatever the element now points at, reporting failure as completion. */
+function playElement(active: AudioSession, url: string): void {
+  const element = getAudioElement();
+  active.url = url;
 
-  const next = active.queue.shift();
-  if (next === undefined) {
-    // Out of clips: finished only if nothing more is coming. A `done` event
-    // that lands mid-queue therefore never cuts playback short.
-    if (active.closed) finishAudio(active);
+  const done = () => {
+    if (active.run !== generation) return;
+    finishAudio(active);
+  };
+
+  element.onended = done;
+  // Playback failure is reported as completion for the same reason a failed
+  // utterance is: a voice loop waiting on `onEnd` must not stall.
+  element.onerror = done;
+
+  element.src = url;
+  void element.play().catch(done);
+}
+
+/**
+ * Appends one chunk at a time, because `appendBuffer` is asynchronous and
+ * throws if called while the previous append is still running.
+ */
+function pumpAudio(active: AudioSession): void {
+  const { buffer, media } = active;
+  if (active.run !== generation || !buffer || !media) return;
+  if (buffer.updating) return;
+
+  const next = active.pending.shift();
+
+  if (next !== undefined) {
+    try {
+      buffer.appendBuffer(next as BufferSource);
+    } catch {
+      // Out of buffer space or a malformed range: play what has landed.
+      active.pending.length = 0;
+      active.closed = true;
+    }
+
+    if (!active.started) {
+      active.started = true;
+      void getAudioElement().play().catch(() => {});
+    }
     return;
   }
 
-  active.busy = true;
+  // Everything appended. Closing the stream is what lets the element fire
+  // `ended`, which is how the voice loop learns the reply is over.
+  if (active.closed && media.readyState === "open") {
+    try {
+      media.endOfStream();
+    } catch {
+      // Already ended.
+    }
+  }
+}
 
-  const element = getAudioElement();
-  const url = URL.createObjectURL(next);
+/** Starts the streaming path: the recording plays while it still arrives. */
+function openMediaSource(active: AudioSession): void {
+  const media = new MediaSource();
+  active.media = media;
+
+  const url = URL.createObjectURL(media);
   active.url = url;
 
-  const advance = () => {
+  const element = getAudioElement();
+
+  const done = () => {
     if (active.run !== generation) return;
-    element.onended = null;
-    element.onerror = null;
-    URL.revokeObjectURL(url);
-    if (active.url === url) active.url = null;
-    active.busy = false;
-    pumpAudio(active);
+    finishAudio(active);
   };
 
-  element.onended = advance;
-  // A clip that won't decode or play is skipped rather than ending the
-  // reply: the sentences after it are still worth hearing.
-  element.onerror = advance;
-
+  element.onended = done;
+  element.onerror = done;
   element.src = url;
-  void element.play().catch(advance);
+
+  media.addEventListener(
+    "sourceopen",
+    () => {
+      if (active.run !== generation) return;
+      try {
+        active.buffer = media.addSourceBuffer(STREAM_MIME);
+      } catch {
+        // Support was advertised and then refused. Nothing can play.
+        done();
+        return;
+      }
+      active.buffer.addEventListener("updateend", () => pumpAudio(active));
+      pumpAudio(active);
+    },
+    { once: true },
+  );
 }
 
 function setState(next: SpeechState): void {
@@ -322,11 +427,11 @@ export interface SpeakOptions {
   onEnd?: () => void;
 }
 
-/** A session that clips can be appended to while it is already playing. */
+/** A recording that arrives in consecutive chunks while it plays. */
 export interface AudioStream {
-  /** Queues a clip. Safe to call after `close`, where it is ignored. */
-  push: (clip: Blob) => void;
-  /** Signals that no more clips are coming; `onEnd` fires once drained. */
+  /** Appends the next chunk. Ignored after `close`. */
+  push: (chunk: Uint8Array) => void;
+  /** Signals that the last chunk has arrived. Safe to call more than once. */
   close: () => void;
 }
 
@@ -337,7 +442,7 @@ const NO_OP_AUDIO_STREAM: AudioStream = {
 
 /**
  * Plays pre-rendered audio for a message, in place of the browser's voice,
- * with the clips supplied over time.
+ * with the recording supplied in consecutive chunks.
  *
  * Shares the same "who is speaking" state as synthesis, so the UI and the
  * voice loop cannot tell the two apart — which is the point: the provider
@@ -352,38 +457,79 @@ export function playAudioStream(id: string, options: SpeakOptions = {}): AudioSt
   stopSpeaking();
   const run = ++generation;
 
+  const streaming = canStreamAudio();
+
   const active: AudioSession = {
     id,
     run,
     onEnd: options.onEnd,
-    queue: [],
     closed: false,
-    busy: false,
     url: null,
+    media: null,
+    buffer: null,
+    pending: [],
+    collected: streaming ? null : [],
+    started: false,
   };
 
   audioSession = active;
   setState({ speakingId: id });
 
+  if (streaming) openMediaSource(active);
+
   return {
-    push: (clip: Blob) => {
+    push: (chunk: Uint8Array) => {
       if (active.run !== generation || active.closed) return;
-      active.queue.push(clip);
+      if (active.collected) {
+        active.collected.push(chunk);
+        return;
+      }
+      active.pending.push(chunk);
       pumpAudio(active);
     },
     close: () => {
-      if (active.run !== generation) return;
+      if (active.run !== generation || active.closed) return;
       active.closed = true;
-      pumpAudio(active);
+
+      if (!active.collected) {
+        pumpAudio(active);
+        return;
+      }
+
+      // Consecutive ranges of one file, so concatenating them is that file.
+      const blob = new Blob(active.collected as BlobPart[], { type: STREAM_MIME });
+      active.collected = null;
+      playElement(active, URL.createObjectURL(blob));
     },
   };
 }
 
-/** Plays a single pre-rendered clip: a stream that is closed immediately. */
+/** Plays one complete recording, as served for an older message. */
 export function playAudioBlob(id: string, blob: Blob, options: SpeakOptions = {}): void {
-  const stream = playAudioStream(id, options);
-  stream.push(blob);
-  stream.close();
+  if (typeof window === "undefined") {
+    options.onEnd?.();
+    return;
+  }
+
+  stopSpeaking();
+  const run = ++generation;
+
+  const active: AudioSession = {
+    id,
+    run,
+    onEnd: options.onEnd,
+    closed: true,
+    url: null,
+    media: null,
+    buffer: null,
+    pending: [],
+    collected: null,
+    started: true,
+  };
+
+  audioSession = active;
+  setState({ speakingId: id });
+  playElement(active, URL.createObjectURL(blob));
 }
 
 /** A session that text can be appended to while it is already playing. */

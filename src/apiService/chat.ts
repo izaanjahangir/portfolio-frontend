@@ -36,10 +36,11 @@ export interface ChatStreamHandlers {
   /** Optional progress label while the agent uses a tool. */
   onStatus?: (label: string) => void;
   /**
-   * Fired per synthesised sentence, in speaking order, while the text is
-   * still streaming. Play the clips back to back in arrival order.
+   * Fired per chunk of the spoken reply, in order, while the text is still
+   * streaming. The chunks are consecutive ranges of one recording, so they
+   * are appended rather than played separately. `final` marks the last.
    */
-  onAudio?: (clip: Blob) => void;
+  onAudio?: (chunk: Uint8Array, final: boolean) => void;
 }
 
 function parseJson<T>(data: string): T | null {
@@ -50,13 +51,13 @@ function parseJson<T>(data: string): T | null {
   }
 }
 
-/** base64 → Blob. Null for a clip that arrives malformed, which is skippable. */
-function decodeAudioClip({ b64, mime }: ChatStreamAudio): Blob | null {
+/** base64 → bytes. Null for a chunk that arrives malformed. */
+function decodeAudioChunk(b64: string): Uint8Array | null {
   try {
     const binary = atob(b64);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-    return new Blob([bytes], { type: mime || "audio/mpeg" });
+    return bytes;
   } catch {
     return null;
   }
@@ -132,13 +133,14 @@ export async function postChatStream(
       }
 
       case "audio": {
-        // Handed on in arrival order and never sorted: the backend
-        // guarantees speaking order, and holding clips back to reorder
-        // them would reintroduce the silence this event exists to remove.
-        const clip = parseJson<ChatStreamAudio>(frame.data);
-        if (!clip?.b64) break;
-        const blob = decodeAudioClip(clip);
-        if (blob) handlers.onAudio?.(blob);
+        // Handed on in arrival order and never sorted: these are byte
+        // ranges of one recording, so order is the file. A chunk that
+        // won't decode is dropped — `done` still closes the recording,
+        // so losing the one marked `final` cannot strand playback.
+        const chunk = parseJson<ChatStreamAudio>(frame.data);
+        if (!chunk?.b64) break;
+        const bytes = decodeAudioChunk(chunk.b64);
+        if (bytes) handlers.onAudio?.(bytes, chunk.final === true);
         break;
       }
 

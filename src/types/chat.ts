@@ -86,18 +86,24 @@ export interface ChatStreamLanguage {
 }
 
 /**
- * Payload of an SSE `audio` event: one synthesised sentence, base64-encoded.
+ * Payload of an SSE `audio` event: one base64 chunk of the spoken reply.
  *
- * Sent only for `channel: "voice"`, interleaved with the deltas, and always
- * in speaking order — `index` counts 0,1,2,… so it is a sanity check, not
- * something to sort by. Best effort: a sentence whose synthesis failed is
- * skipped silently, so an answer may carry no audio at all even after
- * `start` reported `tts_available`.
+ * The whole answer is a **single recording**, sent as consecutive byte
+ * ranges of that one file as the provider produces it — typically 90-100
+ * chunks, or exactly one when the backend serves it from its cache. A
+ * chunk is not playable on its own; they are appended, never queued.
+ *
+ * Sent only for `channel: "voice"`, always in order (`index` counts
+ * 0,1,2,…). Exactly one chunk carries `final`, and it is the last. Best
+ * effort: `final` may arrive early if synthesis failed partway, and an
+ * answer may carry no audio at all even after `start` reported
+ * `tts_available`.
  */
 export interface ChatStreamAudio {
   index: number;
   b64: string;
   mime: string;
+  final?: boolean;
 }
 
 /** Payload of the SSE `done` event. */

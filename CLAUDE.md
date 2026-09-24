@@ -120,18 +120,32 @@ non-200 and the caller uses the browser voice. With a metered free tier,
 running out of credits is scheduled rather than exceptional.
 
 **A live reply's audio comes down the stream, never from a fetch.** The
-`audio` events on `/api/chat/stream` carry the reply sentence by sentence,
-in speaking order; `playAudioStream` queues them and plays each from the
-previous one's `ended`. `GET /messages/{id}/audio` is now only for replaying
-an older message — calling it mid-stream duplicates what already arrived.
-Audio is best effort, so a reply can carry no clips at all even after
-`tts_available` was true, and the browser voice takes over.
+`audio` events on `/api/chat/stream` carry it as consecutive byte ranges of
+**one recording** — typically 90-100 chunks, or exactly one when the backend
+serves it from cache. A chunk is not playable alone, so `playAudioStream`
+appends them into a single buffer rather than queueing clips; that is what
+makes a reply play without seams. `GET /messages/{id}/audio` is only for
+replaying an older message. Audio is best effort, so a reply can carry none
+at all even after `tts_available` was true, and the browser voice takes over.
+
+**Appends are serialised.** `appendBuffer` is asynchronous and throws if
+called while the previous append is still running, so chunks wait in
+`pending` and the next one goes in on `updateend`. `endOfStream()` is what
+lets the element fire `ended`, which is how the voice loop learns the reply
+is over — skip it and the loop hangs in `speaking`.
+
+**Keep the buffering fallback.** `canStreamAudio()` picks between playing
+the recording as it arrives (Media Source Extensions) and collecting the
+chunks to play the finished file. Safari 26 and Chrome both support MSE for
+`audio/mpeg` — this was verified, not assumed — but iOS has historically
+not, and concatenated chunks reconstruct the file byte for byte, so the
+fallback costs a few lines and covers a browser we cannot test here.
 
 **Playback must be unlocked inside the click that starts voice mode.**
-Browsers only allow audio a visitor asked for, and the first clip arrives
+Browsers only allow audio a visitor asked for, and the recording starts
 long after the gesture, so `unlockAudioPlayback` plays silence while the
-click is still live. Every clip then reuses that same element — Safari
-grants permission to the element, not the document.
+click is still live. Playback then reuses that same element — Safari grants
+permission to the element, not the document.
 
 **Pick the voice explicitly.** The browser's default is routinely one of
 the worst voices installed (macOS defaults to "Daniel"). `utils/voices.ts`
